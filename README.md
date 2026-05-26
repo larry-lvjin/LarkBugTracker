@@ -4,13 +4,13 @@
 [![](https://img.shields.io/badge/Platform-Feishu%20Bitable-blue.svg)](https://www.feishu.cn/)
 [![](https://img.shields.io/badge/Status-Active-green.svg)](https://github.com/larry-plaud/SigmaBugTrackerForEarPhone)
 
-## 📖 简介 | Introduction
+## 简介 | Introduction
 
 **Sigma 耳机Bug Tracker** 是一款基于飞书多维表格的 Bug 数据追踪与可视化插件。它可以实时统计 Bug 状态分布、趋势变化，并通过群机器人 Webhook 每天自动推送包含交互式图表的数据卡片到飞书群聊。
 
 无论是日常 Bug 管理、迭代质量追踪，还是团队汇报，本工具都能帮助团队快速掌握项目质量全貌。
 
-## ✨ 核心特性 | Features
+## 核心特性 | Features
 
 - **实时看板**：4 大核心指标一目了然 — 总数、未解决、重新打开、未解决占比。
 - **6 张趋势图表**：Bug 状态分布（堆叠面积图）+ 5 张趋势折线图，点击可放大查看详细数据。
