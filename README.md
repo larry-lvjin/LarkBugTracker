@@ -20,7 +20,7 @@
 - **历史数据回填**：一键从原始 Bug 记录重建完整历史数据，基于创建时间 / 解决日期 / 流转时间推算每日状态。
 - **插件内设置**：侧边栏设置面板，配置 Webhook 地址并持久化到多维表格。
 
-## 📁 项目结构 | Project Structure
+## 项目结构 | Project Structure
 
 ```
 .
@@ -41,7 +41,7 @@
 └── .gitignore
 ```
 
-## 🚀 快速开始 | Quick Start
+## 快速开始 | Quick Start
 
 ### 1. 环境要求
 
@@ -72,7 +72,7 @@ npm run build
 
 构建产物输出到 `dist/` 目录。
 
-## 📊 图表说明 | Charts
+## 图表说明 | Charts
 
 ### 插件端（Chart.js）
 
