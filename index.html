@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bug Tracker</title>
+  <link rel="stylesheet" href="/src/style.css">
+</head>
+<body>
+  <div id="app">
+    <div class="header">
+      <h1>Sigma 耳机Bug Tracker</h1>
+      <div class="actions">
+        <button id="refreshBtn" title="刷新数据">&#8635; 刷新</button>
+        <button id="settingsBtn" title="设置">&#9881; 设置</button>
+      </div>
+    </div>
+
+    <div id="cards" class="cards loading">
+      <div class="card card-blue">
+        <div class="card-label">总数</div>
+        <div class="card-value" id="totalValue">--</div>
+      </div>
+      <div class="card card-red">
+        <div class="card-label">未解决</div>
+        <div class="card-value" id="unresolvedValue">--</div>
+      </div>
+      <div class="card card-orange">
+        <div class="card-label">重新打开</div>
+        <div class="card-value" id="reopenedValue">--</div>
+      </div>
+      <div class="card card-purple">
+        <div class="card-label">未解决与重新打开占比</div>
+        <div class="card-value" id="ratioValue">--</div>
+      </div>
+    </div>
+
+    <div class="chart-section" data-chart="statusArea">
+      <h2>Bug 状态分布</h2>
+      <div class="chart-container">
+        <canvas id="statusAreaChart"></canvas>
+      </div>
+    </div>
+
+    <div class="chart-section" data-chart="ratio">
+      <h2>未解决占比趋势</h2>
+      <div class="chart-container chart-container-small">
+        <canvas id="ratioChart"></canvas>
+      </div>
+    </div>
+
+    <div class="chart-section" data-chart="newUnresolved">
+      <h2>每日新增未解决</h2>
+      <div class="chart-container chart-container-small">
+        <canvas id="newUnresolvedChart"></canvas>
+      </div>
+    </div>
+
+    <div class="chart-section" data-chart="newReopened">
+      <h2>每日新增重新打开</h2>
+      <div class="chart-container chart-container-small">
+        <canvas id="newReopenedChart"></canvas>
+      </div>
+    </div>
+
+    <div class="chart-section" data-chart="newVerify">
+      <h2>每日新增待验收+持续测试</h2>
+      <div class="chart-container chart-container-small">
+        <canvas id="newVerifyChart"></canvas>
+      </div>
+    </div>
+
+    <div class="chart-section" data-chart="newClosed">
+      <h2>每日新增已关闭</h2>
+      <div class="chart-container chart-container-small">
+        <canvas id="newClosedChart"></canvas>
+      </div>
+    </div>
+
+    <div id="status" class="status"></div>
+    <div id="historyInfo" class="history-info"></div>
+  </div>
+
+  <div id="settingsModal" class="settings-modal">
+    <div class="settings-modal-content">
+      <div class="settings-modal-header">
+        <span>设置</span>
+        <button id="settingsClose" class="modal-close-btn">&times;</button>
+      </div>
+      <div class="settings-modal-body">
+        <div class="settings-group">
+          <label class="settings-label">群机器人 Webhook 地址</label>
+          <input id="webhookInput" class="settings-input" type="password" placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/" autocomplete="off">
+          <div class="settings-hint">每天早上 9:00 自动推送数据到群</div>
+        </div>
+        <div class="settings-actions">
+          <button id="saveWebhookBtn" class="settings-btn settings-btn-primary">保存</button>
+          <button id="sendNowBtn" class="settings-btn settings-btn-send">立即发送</button>
+        </div>
+        <div id="settingsStatus" class="settings-status"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="chartModal" class="chart-modal">
+    <div class="chart-modal-content">
+      <div class="chart-modal-header">
+        <span id="modalTitle"></span>
+        <button id="modalClose" class="modal-close-btn">&times;</button>
+      </div>
+      <div class="chart-modal-body">
+        <canvas id="modalChart"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

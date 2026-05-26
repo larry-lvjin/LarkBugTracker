@@ -1,0 +1,22 @@
+name: Daily Bug Collection
+
+on:
+  schedule:
+    - cron: '59 15 * * *'  # UTC 15:59 = Beijing 23:59
+  workflow_dispatch:        # Allow manual trigger
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Run collection script
+        env:
+          FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
+          FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
+        run: node cron/collect.js
