@@ -1,4 +1,4 @@
-# 🐛 Sigma 耳机Bug Tracker — 飞书多维表格插件
+#  Sigma 耳机Bug Tracker — 飞书多维表格插件
 
 [![](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![](https://img.shields.io/badge/Platform-Feishu%20Bitable-blue.svg)](https://www.feishu.cn/)
@@ -12,13 +12,13 @@
 
 ## ✨ 核心特性 | Features
 
-- **📊 实时看板**：4 大核心指标一目了然 — 总数、未解决、重新打开、未解决占比。
-- **📈 6 张趋势图表**：Bug 状态分布（堆叠面积图）+ 5 张趋势折线图，点击可放大查看详细数据。
-- **🤖 群机器人推送**：一键发送当前数据到飞书群，卡片内嵌 VChart 交互式图表，支持点击放大、Tooltip 查看。
-- **⏰ 每日自动推送**：GitHub Actions 定时任务，每天早上 9:03（北京时间）自动发送数据报告到群。
-- **📦 每日自动采集**：每天 23:59（北京时间）自动采集 Bug 数据，计算状态流转（基于集合差异），写入历史表。
-- **🔄 历史数据回填**：一键从原始 Bug 记录重建完整历史数据，基于创建时间 / 解决日期 / 流转时间推算每日状态。
-- **⚙️ 插件内设置**：侧边栏设置面板，配置 Webhook 地址并持久化到多维表格。
+- **实时看板**：4 大核心指标一目了然 — 总数、未解决、重新打开、未解决占比。
+- **6 张趋势图表**：Bug 状态分布（堆叠面积图）+ 5 张趋势折线图，点击可放大查看详细数据。
+- **群机器人推送**：一键发送当前数据到飞书群，卡片内嵌 VChart 交互式图表，支持点击放大、Tooltip 查看。
+- **每日自动推送**：GitHub Actions 定时任务，每天早上 9:03（北京时间）自动发送数据报告到群。
+- **每日自动采集**：每天 23:59（北京时间）自动采集 Bug 数据，计算状态流转（基于集合差异），写入历史表。
+- **历史数据回填**：一键从原始 Bug 记录重建完整历史数据，基于创建时间 / 解决日期 / 流转时间推算每日状态。
+- **插件内设置**：侧边栏设置面板，配置 Webhook 地址并持久化到多维表格。
 
 ## 📁 项目结构 | Project Structure
 
@@ -94,7 +94,7 @@ npm run build
 - 小图模式：清晰展示趋势走势，带坐标轴和彩色圆点图例
 - 点击放大：查看完整尺寸图表，触摸/悬停显示 Tooltip（日期 + 图标 + 系列名 + 数值）
 
-## ⏰ 定时任务 | Cron Jobs
+## 定时任务 | Cron Jobs
 
 ### `cron/collect.js` — 每日数据采集
 
@@ -141,7 +141,7 @@ Webhook 地址支持两种配置方式（按优先级）：
 | `BugStats_Snapshot` | 每日记录级快照（用于集合差异计算状态流转） |
 | `BugStats_Settings` | Key-Value 配置存储（Webhook 地址等） |
 
-## 🛠️ 技术栈 | Tech Stack
+## 技术栈 | Tech Stack
 
 - **插件框架**: [Lark Base JS SDK](https://github.com/nicognaW/feishu-base-open-js-sdk) (`@lark-base-open/js-sdk`)
 - **插件图表**: [Chart.js](https://www.chartjs.org/) v4
@@ -151,7 +151,7 @@ Webhook 地址支持两种配置方式（按优先级）：
 - **后端 API**: 飞书开放平台 Bitable API
 - **开发语言**: JavaScript (ES Modules)
 
-## 🤝 贡献指南 | Contributing
+## 贡献指南 | Contributing
 
 欢迎提交 Issue 和 Pull Request！
 
@@ -162,5 +162,3 @@ Webhook 地址支持两种配置方式（按优先级）：
 5. 开启一个 Pull Request
 
 ---
-
-如果这个工具对你有帮助，请给个 ⭐️ 支持一下！
