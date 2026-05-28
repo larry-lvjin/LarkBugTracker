@@ -1,0 +1,9 @@
+{
+  "manifestVersion": 1,
+  "blockTypeID": "blk_6a0ef90de2410cbc47f17295",
+  "blockRenderType": "offlineWeb",
+  "offlineWebConfig": {
+    "entry": "index.html"
+  },
+  "projectName": "Sigma 耳机Bug Tracker"
+}

@@ -295,3 +295,65 @@ h2 { font-size: 13px; font-weight: 600; color: #1f2329; margin-bottom: 10px; }
 }
 .settings-status.success { color: #2DB87F; }
 .settings-status.error { color: #FF5C5C; }
+
+.settings-divider {
+  border-top: 1px solid #e5e6e8;
+  margin: 20px 0;
+}
+
+.stats-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.stats-export-btn {
+  flex: none;
+  padding: 4px 12px;
+  font-size: 11px;
+  background: #4C6FFF;
+  color: #fff;
+}
+
+.stats-table-wrap {
+  max-height: 400px;
+  overflow: auto;
+  border: 1px solid #e5e6e8;
+  border-radius: 6px;
+}
+
+.stats-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.stats-table thead { position: sticky; top: 0; z-index: 1; }
+
+.stats-table th {
+  background: #f7f8fa;
+  font-weight: 600;
+  color: #646a73;
+  padding: 6px 6px;
+  border-bottom: 1px solid #e5e6e8;
+  text-align: right;
+}
+
+.stats-table th:first-child { text-align: left; }
+
+.stats-table td {
+  padding: 4px 6px;
+  border-bottom: 1px solid #f0f1f3;
+  text-align: right;
+  color: #1f2329;
+}
+
+.stats-table td:first-child {
+  text-align: left;
+  font-weight: 500;
+  color: #646a73;
+}
+
+.stats-table tbody tr:hover { background: #f7f8fa; }

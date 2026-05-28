@@ -7,7 +7,12 @@ const BUG_VIEW_ID = "vewUHHFITx";
 const HISTORY_TABLE_NAME = "BugStats_History";
 const SNAPSHOT_TABLE_NAME = "BugStats_Snapshot";
 
-const TRACKED_STATUSES = ["未解决", "待验收", "重新打开", "已关闭"];
+const TRACKED_STATUSES = [
+  "未解决", "待验收", "重新打开", "已关闭",
+  "已回归，持续测试", "未复现，持续测试", "设计如此", "暂不修复",
+  "无效问题", "待评审", "临时版本验证", "需补充日志", "双连接，5月份开始处理",
+];
+const CLOSED_STATUSES = ["已关闭", "设计如此", "暂不修复", "无效问题"];
 
 async function request(url, options = {}) {
   const resp = await fetch(url, options);
@@ -109,12 +114,17 @@ function buildDailySets(records) {
   const current = new Date(firstDate + "T00:00:00");
   const end = new Date(today + "T00:00:00");
 
-  let prevSets = { "未解决": new Set(), "待验收": new Set(), "重新打开": new Set(), "已关闭": new Set() };
+  const emptyStatusSets = () => {
+    const s = {};
+    for (const st of TRACKED_STATUSES) s[st] = new Set();
+    return s;
+  };
+  let prevSets = emptyStatusSets();
 
   while (current <= end) {
     const dateStr = formatDate(current);
 
-    const todaySets = { "未解决": new Set(), "待验收": new Set(), "重新打开": new Set(), "已关闭": new Set() };
+    const todaySets = emptyStatusSets();
     let total = 0;
 
     for (const bug of bugs) {
@@ -128,6 +138,17 @@ function buildDailySets(records) {
     const pending = todaySets["待验收"].size;
     const reopened = todaySets["重新打开"].size;
     const closed = todaySets["已关闭"].size;
+    const testing = todaySets["已回归，持续测试"].size;
+    const testingOld = todaySets["未复现，持续测试"].size;
+    const byDesign = todaySets["设计如此"].size;
+    const wontfix = todaySets["暂不修复"].size;
+    const invalid = todaySets["无效问题"].size;
+    const reviewing = todaySets["待评审"].size;
+    const tempVerify = todaySets["临时版本验证"].size;
+    const needLog = todaySets["需补充日志"].size;
+    const dupLink = todaySets["双连接，5月份开始处理"].size;
+    const tracked = unresolved + pending + reopened + closed + testing + testingOld + byDesign + wontfix + invalid + reviewing + tempVerify + needLog + dupLink;
+    const missing = total - tracked;
     const ratio = total > 0 ? parseFloat((((unresolved + reopened) / total) * 100).toFixed(1)) : 0;
 
     const setDiff = (today, yesterday) => {
@@ -136,12 +157,17 @@ function buildDailySets(records) {
       return count;
     };
 
+    const closedAll = new Set([...todaySets["已关闭"], ...todaySets["设计如此"], ...todaySets["暂不修复"], ...todaySets["无效问题"]]);
+    const prevClosedAll = new Set([...prevSets["已关闭"], ...prevSets["设计如此"], ...prevSets["暂不修复"], ...prevSets["无效问题"]]);
+
     results.push({
       date: dateStr, total, unresolved, pending, reopened, closed, ratio,
+      testing, testingOld, byDesign, wontfix, invalid, reviewing, tempVerify, needLog, dupLink, missing,
       toUnresolved: setDiff(todaySets["未解决"], prevSets["未解决"]),
       toPending: setDiff(todaySets["待验收"], prevSets["待验收"]),
       toReopened: setDiff(todaySets["重新打开"], prevSets["重新打开"]),
-      toClosed: setDiff(todaySets["已关闭"], prevSets["已关闭"]),
+      toClosed: setDiff(closedAll, prevClosedAll),
+      toTesting: setDiff(todaySets["已回归，持续测试"], prevSets["已回归，持续测试"]),
     });
 
     prevSets = todaySets;
@@ -251,6 +277,13 @@ async function main() {
     { name: "待评审", type: 2 },
     { name: "暂不修复", type: 2 },
     { name: "双连接", type: 2 },
+    { name: "设计如此", type: 2 },
+    { name: "已关闭", type: 2 },
+    { name: "无效问题", type: 2 },
+    { name: "未复现持续测试", type: 2 },
+    { name: "临时版本验证", type: 2 },
+    { name: "需补充日志", type: 2 },
+    { name: "消失的状态", type: 2 },
     { name: "其他到未解决", type: 2 },
     { name: "其他到待验收", type: 2 },
     { name: "其他到重新打开", type: 2 },
@@ -271,15 +304,22 @@ async function main() {
       "占比(%)": s.ratio,
       "新增未解决": s.toUnresolved,
       "每日解决": s.toClosed,
-      "持续测试": 0,
-      "待评审": 0,
-      "暂不修复": 0,
-      "双连接": 0,
+      "持续测试": s.testing,
+      "待评审": s.reviewing,
+      "暂不修复": s.wontfix,
+      "双连接": s.dupLink,
+      "设计如此": s.byDesign,
+      "已关闭": s.closed,
+      "无效问题": s.invalid,
+      "未复现持续测试": s.testingOld,
+      "临时版本验证": s.tempVerify,
+      "需补充日志": s.needLog,
+      "消失的状态": s.missing,
       "其他到未解决": s.toUnresolved,
       "其他到待验收": s.toPending,
       "其他到重新打开": s.toReopened,
       "其他到已关闭": s.toClosed,
-      "其他到持续测试": 0,
+      "其他到持续测试": s.toTesting || 0,
     },
   }));
 
@@ -293,6 +333,12 @@ async function main() {
     { field_name: "重新打开_ids", type: 1 },
     { field_name: "已关闭_ids", type: 1 },
     { field_name: "持续测试_ids", type: 1 },
+    { field_name: "未复现持续测试_ids", type: 1 },
+  ]);
+
+  await ensureFields(token, snapshotTableId, [
+    { name: "持续测试_ids", type: 1 },
+    { name: "未复现持续测试_ids", type: 1 },
   ]);
 
   console.log("Clearing old snapshots...");
@@ -301,17 +347,19 @@ async function main() {
   const todayStr = dailyStats[dailyStats.length - 1]?.date;
   if (todayStr && lastSets) {
     console.log("Saving today's snapshot...");
+    const closedIds = new Set([...lastSets["已关闭"], ...lastSets["设计如此"], ...lastSets["暂不修复"], ...lastSets["无效问题"]]);
     await batchInsert(token, snapshotTableId, [{
       fields: {
         "日期": todayStr,
         "未解决_ids": Array.from(lastSets["未解决"]).join(","),
         "待验收_ids": Array.from(lastSets["待验收"]).join(","),
         "重新打开_ids": Array.from(lastSets["重新打开"]).join(","),
-        "已关闭_ids": Array.from(lastSets["已关闭"]).join(","),
-        "持续测试_ids": "",
+        "已关闭_ids": Array.from(closedIds).join(","),
+        "持续测试_ids": Array.from(lastSets["已回归，持续测试"]).join(","),
+        "未复现持续测试_ids": Array.from(lastSets["未复现，持续测试"]).join(","),
       },
     }]);
-    console.log(`Snapshot saved: 未解决=${lastSets["未解决"].size} 待验收=${lastSets["待验收"].size} 重新打开=${lastSets["重新打开"].size} 已关闭=${lastSets["已关闭"].size}`);
+    console.log(`Snapshot saved: 未解决=${lastSets["未解决"].size} 待验收=${lastSets["待验收"].size} 重新打开=${lastSets["重新打开"].size} 已关闭=${closedIds.size} 持续测试=${lastSets["已回归，持续测试"].size}`);
   }
 
   console.log("Done!");

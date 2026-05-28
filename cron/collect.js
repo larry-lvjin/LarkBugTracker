@@ -64,22 +64,32 @@ async function fetchAllRecords(token) {
   return records;
 }
 
+const CLOSED_STATUSES = ["已关闭", "设计如此", "暂不修复", "无效问题"];
+
 function analyzeRecords(records) {
   const sets = {
     "未解决": new Set(), "待验收": new Set(), "重新打开": new Set(), "已关闭": new Set(),
-    "未复现，持续测试": new Set(),
+    "已回归，持续测试": new Set(), "未复现，持续测试": new Set(),
   };
-  let testing = 0, reviewing = 0, wontfix = 0, dupLink = 0;
+  let testing = 0, testingOld = 0, reviewing = 0, wontfix = 0, dupLink = 0;
+  let byDesign = 0, closed = 0, invalid = 0, tempVerify = 0, needLog = 0;
   for (const record of records) {
     const status = extractText(record.fields["问题状态"]);
     const id = record.record_id;
     if (sets[status]) sets[status].add(id);
-    if (status === "未复现，持续测试") testing++;
+    if (CLOSED_STATUSES.includes(status)) sets["已关闭"].add(id);
+    if (status === "已回归，持续测试") testing++;
+    if (status === "未复现，持续测试") testingOld++;
     if (status === "待评审") reviewing++;
     if (status === "暂不修复") wontfix++;
-    if (status === "双连接，5月开始处理") dupLink++;
+    if (status === "双连接，5月份开始处理") dupLink++;
+    if (status === "设计如此") byDesign++;
+    if (status === "已关闭") closed++;
+    if (status === "无效问题") invalid++;
+    if (status === "临时版本验证") tempVerify++;
+    if (status === "需补充日志") needLog++;
   }
-  return { total: records.length, sets, testing, reviewing, wontfix, dupLink };
+  return { total: records.length, sets, testing, testingOld, reviewing, wontfix, dupLink, byDesign, closed, invalid, tempVerify, needLog };
 }
 
 function computeTransitions(todaySets, yesterdaySets) {
@@ -93,7 +103,8 @@ function computeTransitions(todaySets, yesterdaySets) {
     toPending: diff(todaySets["待验收"], yesterdaySets["待验收"]),
     toReopened: diff(todaySets["重新打开"], yesterdaySets["重新打开"]),
     toClosed: diff(todaySets["已关闭"], yesterdaySets["已关闭"]),
-    toTesting: diff(todaySets["未复现，持续测试"], yesterdaySets["未复现，持续测试"]),
+    toTesting: diff(todaySets["已回归，持续测试"], yesterdaySets["已回归，持续测试"]),
+    toTestingOld: diff(todaySets["未复现，持续测试"], yesterdaySets["未复现，持续测试"]),
   };
 }
 
@@ -112,7 +123,7 @@ async function ensureFields(token, tableId) {
     { method: "GET", headers: authHeaders(token) }
   );
   const existing = data.data.items.map((f) => f.field_name);
-  for (const name of ["待验收", "持续测试", "待评审", "暂不修复", "双连接", "其他到未解决", "其他到待验收", "其他到重新打开", "其他到已关闭", "其他到持续测试"]) {
+  for (const name of ["待验收", "持续测试", "待评审", "暂不修复", "双连接", "设计如此", "已关闭", "无效问题", "未复现持续测试", "临时版本验证", "需补充日志", "消失的状态", "其他到未解决", "其他到待验收", "其他到重新打开", "其他到已关闭", "其他到持续测试"]) {
     if (!existing.includes(name)) {
       await request(
         `${FEISHU_API}/bitable/v1/apps/${APP_TOKEN}/tables/${tableId}/fields`,
@@ -124,7 +135,7 @@ async function ensureFields(token, tableId) {
 }
 
 async function loadSnapshot(token, snapshotTableId, dateStr) {
-  const emptySets = { "未解决": new Set(), "待验收": new Set(), "重新打开": new Set(), "已关闭": new Set(), "未复现，持续测试": new Set() };
+  const emptySets = { "未解决": new Set(), "待验收": new Set(), "重新打开": new Set(), "已关闭": new Set(), "已回归，持续测试": new Set(), "未复现，持续测试": new Set() };
   let pageToken = undefined;
   for (let page = 0; page < 10; page++) {
     const body = { page_size: 200 };
@@ -145,7 +156,8 @@ async function loadSnapshot(token, snapshotTableId, dateStr) {
           "待验收": parse("待验收_ids"),
           "重新打开": parse("重新打开_ids"),
           "已关闭": parse("已关闭_ids"),
-          "未复现，持续测试": parse("持续测试_ids"),
+          "已回归，持续测试": parse("持续测试_ids"),
+          "未复现，持续测试": parse("未复现持续测试_ids"),
         };
       }
     }
@@ -180,7 +192,8 @@ async function saveSnapshot(token, snapshotTableId, dateStr, sets) {
     "待验收_ids": Array.from(sets["待验收"]).join(","),
     "重新打开_ids": Array.from(sets["重新打开"]).join(","),
     "已关闭_ids": Array.from(sets["已关闭"]).join(","),
-    "持续测试_ids": Array.from(sets["未复现，持续测试"]).join(","),
+    "持续测试_ids": Array.from(sets["已回归，持续测试"]).join(","),
+    "未复现持续测试_ids": Array.from(sets["未复现，持续测试"]).join(","),
   };
 
   if (existingId) {
@@ -256,6 +269,13 @@ async function saveHistoryRecord(token, historyTableId, dateStr, data) {
     "待评审": data.reviewing,
     "暂不修复": data.wontfix,
     "双连接": data.dupLink,
+    "设计如此": data.byDesign,
+    "已关闭": data.closed,
+    "无效问题": data.invalid,
+    "未复现持续测试": data.testingOld,
+    "临时版本验证": data.tempVerify,
+    "需补充日志": data.needLog,
+    "消失的状态": data.missing,
     "新增未解决": data.toUnresolved,
     "每日解决": data.toClosed,
     "其他到未解决": data.toUnresolved,
@@ -290,14 +310,16 @@ async function main() {
 
   const token = await getToken();
   const records = await fetchAllRecords(token);
-  const { total, sets, testing, reviewing, wontfix, dupLink } = analyzeRecords(records);
+  const { total, sets, testing, testingOld, reviewing, wontfix, dupLink, byDesign, closed, invalid, tempVerify, needLog } = analyzeRecords(records);
 
   const unresolved = sets["未解决"].size;
   const pending = sets["待验收"].size;
   const reopened = sets["重新打开"].size;
   const ratio = total > 0 ? parseFloat((((unresolved + reopened) / total) * 100).toFixed(1)) : 0;
+  const trackedSum = unresolved + pending + reopened + testing + testingOld + reviewing + wontfix + dupLink + byDesign + closed + invalid + tempVerify + needLog;
+  const missing = total - trackedSum;
 
-  console.log(`Total: ${total}, 未解决: ${unresolved}, 待验收: ${pending}, 重新打开: ${reopened}, 持续测试: ${testing}, ratio: ${ratio}%`);
+  console.log(`Total: ${total}, 未解决: ${unresolved}, 待验收: ${pending}, 重新打开: ${reopened}, 持续测试: ${testing}, 消失: ${missing}, ratio: ${ratio}%`);
 
   const historyTableId = await getTableId(token, HISTORY_TABLE_NAME);
   await ensureFields(token, historyTableId);
@@ -311,7 +333,7 @@ async function main() {
   console.log(`Transitions: toUnresolved=${transitions.toUnresolved} toPending=${transitions.toPending} toReopened=${transitions.toReopened} toClosed=${transitions.toClosed}`);
 
   await saveHistoryRecord(token, historyTableId, dateStr, {
-    total, unresolved, pending, reopened, ratio, testing, reviewing, wontfix, dupLink, ...transitions,
+    total, unresolved, pending, reopened, ratio, testing, testingOld, reviewing, wontfix, dupLink, byDesign, closed, invalid, tempVerify, needLog, missing, ...transitions,
   });
 
   console.log("Saving today's snapshot...");

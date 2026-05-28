@@ -1,5 +1,6 @@
 import { bitable } from "@lark-base-open/js-sdk";
 import Chart from "chart.js/auto";
+import * as XLSX from "xlsx";
 
 const HISTORY_TABLE_NAME = "BugStats_History";
 const SETTINGS_TABLE_NAME = "BugStats_Settings";
@@ -75,6 +76,7 @@ async function fetchCurrentData() {
 
   let total = 0, unresolved = 0, pending = 0, reopened = 0;
   let testing = 0, reviewing = 0, wontfix = 0, dupLink = 0;
+  let byDesign = 0, closed = 0, invalid = 0, testingOld = 0, tempVerify = 0, needLog = 0;
   let pageToken = undefined;
   let hasMore = true;
 
@@ -86,24 +88,40 @@ async function fetchCurrentData() {
       if (status === "未解决") unresolved++;
       if (status === "待验收") pending++;
       if (status === "重新打开") reopened++;
-      if (status === "未复现，持续测试") testing++;
+      if (status === "已回归，持续测试") testing++;
       if (status === "待评审") reviewing++;
       if (status === "暂不修复") wontfix++;
-      if (status === "双连接，5月开始处理") dupLink++;
+      if (status === "双连接，5月份开始处理") dupLink++;
+      if (status === "设计如此") byDesign++;
+      if (status === "已关闭") closed++;
+      if (status === "无效问题") invalid++;
+      if (status === "未复现，持续测试") testingOld++;
+      if (status === "临时版本验证") tempVerify++;
+      if (status === "需补充日志") needLog++;
     }
     hasMore = resp.hasMore;
     pageToken = resp.pageToken;
   }
 
   const ratio = total > 0 ? parseFloat((((unresolved + reopened) / total) * 100).toFixed(1)) : 0;
-  return { total, unresolved, pending, reopened, ratio, testing, reviewing, wontfix, dupLink };
+  return { total, unresolved, pending, reopened, ratio, testing, reviewing, wontfix, dupLink, byDesign, closed, invalid, testingOld, tempVerify, needLog };
 }
+
+const REQUIRED_HISTORY_FIELDS = [
+  "日期", "总数", "未解决", "待验收", "重新打开", "占比(%)",
+  "持续测试", "待评审", "暂不修复", "双连接",
+  "设计如此", "已关闭", "无效问题", "未复现持续测试", "临时版本验证", "需补充日志", "消失的状态",
+  "其他到未解决", "其他到待验收", "其他到重新打开", "其他到已关闭", "其他到持续测试",
+];
 
 async function getOrCreateHistoryTable() {
   const tables = await bitable.base.getTableList();
   for (const t of tables) {
     const name = await t.getName();
-    if (name === HISTORY_TABLE_NAME) return t;
+    if (name === HISTORY_TABLE_NAME) {
+      await ensureHistoryFields(t);
+      return t;
+    }
   }
   const { tableId } = await bitable.base.addTable({
     name: HISTORY_TABLE_NAME,
@@ -116,7 +134,20 @@ async function getOrCreateHistoryTable() {
       { name: "占比(%)", type: 2 },
     ],
   });
-  return bitable.base.getTableById(tableId);
+  const table = await bitable.base.getTableById(tableId);
+  await ensureHistoryFields(table);
+  return table;
+}
+
+async function ensureHistoryFields(table) {
+  const fieldMeta = await table.getFieldMetaList();
+  const existing = new Set(fieldMeta.map((f) => f.name));
+  for (const name of REQUIRED_HISTORY_FIELDS) {
+    if (!existing.has(name)) {
+      const fieldType = name === "日期" ? 1 : 2;
+      await table.addField({ type: fieldType, name });
+    }
+  }
 }
 
 async function loadHistory() {
@@ -134,6 +165,13 @@ async function loadHistory() {
     const reviewingField = f("待评审");
     const wontfixField = f("暂不修复");
     const dupLinkField = f("双连接");
+    const byDesignField = f("设计如此");
+    const closedField = f("已关闭");
+    const invalidField = f("无效问题");
+    const testingOldField = f("未复现持续测试");
+    const tempVerifyField = f("临时版本验证");
+    const needLogField = f("需补充日志");
+    const missingField = f("消失的状态");
     const toUnresolvedField = f("其他到未解决");
     const toPendingField = f("其他到待验收");
     const toReopenedField = f("其他到重新打开");
@@ -163,6 +201,13 @@ async function loadHistory() {
           reviewing: reviewingField ? Number(fields[reviewingField.id]) || 0 : 0,
           wontfix: wontfixField ? Number(fields[wontfixField.id]) || 0 : 0,
           dupLink: dupLinkField ? Number(fields[dupLinkField.id]) || 0 : 0,
+          byDesign: byDesignField ? Number(fields[byDesignField.id]) || 0 : 0,
+          closed: closedField ? Number(fields[closedField.id]) || 0 : 0,
+          invalid: invalidField ? Number(fields[invalidField.id]) || 0 : 0,
+          testingOld: testingOldField ? Number(fields[testingOldField.id]) || 0 : 0,
+          tempVerify: tempVerifyField ? Number(fields[tempVerifyField.id]) || 0 : 0,
+          needLog: needLogField ? Number(fields[needLogField.id]) || 0 : 0,
+          missing: missingField ? Number(fields[missingField.id]) || 0 : 0,
           toUnresolved: toUnresolvedField ? Number(fields[toUnresolvedField.id]) || 0 : 0,
           toPending: toPendingField ? Number(fields[toPendingField.id]) || 0 : 0,
           toReopened: toReopenedField ? Number(fields[toReopenedField.id]) || 0 : 0,
@@ -217,6 +262,12 @@ async function saveSnapshot(data) {
   const reviewingF = f2("待评审");
   const wontfixF = f2("暂不修复");
   const dupLinkF = f2("双连接");
+  const byDesignF = f2("设计如此");
+  const closedF = f2("已关闭");
+  const invalidF = f2("无效问题");
+  const testingOldF = f2("未复现持续测试");
+  const tempVerifyF2 = f2("临时版本验证");
+  const needLogF = f2("需补充日志");
 
   const recordFields = {
     [dateField.id]: today,
@@ -230,6 +281,12 @@ async function saveSnapshot(data) {
   if (reviewingF) recordFields[reviewingF.id] = data.reviewing || 0;
   if (wontfixF) recordFields[wontfixF.id] = data.wontfix || 0;
   if (dupLinkF) recordFields[dupLinkF.id] = data.dupLink || 0;
+  if (byDesignF) recordFields[byDesignF.id] = data.byDesign || 0;
+  if (closedF) recordFields[closedF.id] = data.closed || 0;
+  if (invalidF) recordFields[invalidF.id] = data.invalid || 0;
+  if (testingOldF) recordFields[testingOldF.id] = data.testingOld || 0;
+  if (tempVerifyF2) recordFields[tempVerifyF2.id] = data.tempVerify || 0;
+  if (needLogF) recordFields[needLogF.id] = data.needLog || 0;
 
   if (existingRecordId) {
     await histTable.setRecord(existingRecordId, { fields: recordFields });
@@ -308,40 +365,50 @@ async function saveWebhookUrl(url) {
   }
 }
 
-function buildVChartArea(values) {
+function buildVChartArea(values, title) {
   return {
     type: "area",
     data: [{ values }],
     xField: "date", yField: "count", seriesField: "type",
     stack: true,
+    title: { visible: true, text: title, textStyle: { fontSize: 14, fontWeight: "bold", fill: "#1f2329" } },
     legends: {
-      visible: true, position: "top", reverse: true,
-      item: { shape: { style: { symbolType: "circle", size: 8 } }, label: { style: { fontSize: 10, fontWeight: "bold" } } },
+      visible: true, position: "top", reverse: true, padding: { top: 4 },
+      item: { shape: { style: { symbolType: "circle", size: 10 } }, label: { style: { fontSize: 11 } } },
     },
     color: ["#2DB87F", "#9CA3AF", "#F59F00", "#FF5C5C"],
     point: { visible: false },
     label: { visible: false },
     line: { style: { lineWidth: 1.5 } },
     area: { style: { fillOpacity: 0.35 } },
+    axes: [
+      { orient: "left", title: { visible: true, text: "数量", style: { fontSize: 10, fill: "#8f959e" } }, label: { style: { fontSize: 9, fill: "#8f959e" } }, grid: { visible: true, style: { lineDash: [], stroke: "#f0f1f3" } } },
+      { orient: "bottom", label: { style: { fontSize: 9, fill: "#8f959e" } }, grid: { visible: false } },
+    ],
     tooltip: { visible: true, dimension: { visible: true } },
     crosshair: { xField: { visible: true } },
   };
 }
 
-function buildVChartLine(values, color) {
+function buildVChartLine(values, color, title, yLabel) {
   return {
     type: "area",
     data: [{ values }],
     xField: "date", yField: "count", seriesField: "type",
+    title: { visible: true, text: title, textStyle: { fontSize: 14, fontWeight: "bold", fill: "#1f2329" } },
     legends: {
-      visible: true, position: "top",
-      item: { shape: { style: { symbolType: "circle", size: 8, fill: color } }, label: { style: { fontSize: 10, fontWeight: "bold" } } },
+      visible: true, position: "top", padding: { top: 4 },
+      item: { shape: { style: { symbolType: "circle", size: 10, fill: color } }, label: { style: { fontSize: 11 } } },
     },
     color: [color],
     point: { visible: false },
     label: { visible: false },
     line: { style: { lineWidth: 2 } },
     area: { style: { fillOpacity: 0.12 } },
+    axes: [
+      { orient: "left", title: { visible: true, text: yLabel || "数量", style: { fontSize: 10, fill: "#8f959e" } }, label: { style: { fontSize: 9, fill: "#8f959e" } }, grid: { visible: true, style: { lineDash: [], stroke: "#f0f1f3" } } },
+      { orient: "bottom", label: { style: { fontSize: 9, fill: "#8f959e" } }, grid: { visible: false } },
+    ],
     tooltip: { visible: true, dimension: { visible: true } },
     crosshair: { xField: { visible: true } },
   };
@@ -372,9 +439,9 @@ function buildCardMessage(data, history) {
   for (const h of history) {
     const date = h.date.slice(5);
     const solving = h.unresolved + h.reopened;
-    const verifying = h.pending + h.testing + h.reviewing;
-    const other = h.wontfix + h.dupLink;
-    const closed = Math.max(0, h.total - solving - verifying - other);
+    const verifying = h.pending + h.testing + h.testingOld + h.reviewing + h.tempVerify + h.needLog;
+    const closed = h.byDesign + h.wontfix + h.closed + h.invalid;
+    const other = h.dupLink + (h.missing || 0);
     statusValues.push(
       { date, count: closed, type: "已关闭" },
       { date, count: other, type: "其他" },
@@ -384,21 +451,36 @@ function buildCardMessage(data, history) {
   }
 
   const charts = [
-    buildVChartArea(statusValues),
-    buildVChartLine(history.map((h) => ({ date: h.date.slice(5), count: h.ratio, type: "未解决占比(%)" })), "#E879A6"),
-    buildVChartLine(history.map((h) => ({ date: h.date.slice(5), count: h.toUnresolved, type: "其他到未解决" })), "#FF5C5C"),
-    buildVChartLine(history.map((h) => ({ date: h.date.slice(5), count: h.toReopened, type: "其他到重新打开" })), "#F59F00"),
-    buildVChartLine(history.map((h) => ({ date: h.date.slice(5), count: h.toPending + h.toTesting, type: "其他到待验收+持续测试" })), "#B45BD5"),
-    buildVChartLine(history.map((h) => ({ date: h.date.slice(5), count: h.toClosed, type: "其他到已关闭" })), "#2DB87F"),
+    buildVChartArea(statusValues, "Bug 状态分布"),
+    buildVChartLine(history.map((h) => ({ date: h.date.slice(5), count: h.ratio, type: "未解决占比(%)" })), "#E879A6", "未解决占比趋势", "%"),
+    buildVChartLine(history.map((h) => ({ date: h.date.slice(5), count: h.toUnresolved, type: "其他到未解决" })), "#FF5C5C", "每日新增未解决"),
+    buildVChartLine(history.map((h) => ({ date: h.date.slice(5), count: h.toReopened, type: "其他到重新打开" })), "#F59F00", "每日新增重新打开"),
+    buildVChartLine(history.map((h) => ({ date: h.date.slice(5), count: h.toPending + h.toTesting, type: "其他到待验收+持续测试" })), "#B45BD5", "每日新增待验收+持续测试"),
+    buildVChartLine(history.map((h) => ({ date: h.date.slice(5), count: h.toClosed, type: "其他到已关闭" })), "#2DB87F", "每日新增已关闭"),
+  ];
+
+  const chartLabels = [
+    "Bug 状态分布\n<font color='red'>⬤</font>解决中<font color='orange'>⬤</font>验证中<font color='grey'>⬤</font>其他<font color='green'>⬤</font>已关闭",
+    "未解决占比趋势\n<font color='carmine'>⬤</font>占比(%)",
+    "每日新增未解决\n<font color='red'>⬤</font>新增未解决",
+    "每日新增重新打开\n<font color='orange'>⬤</font>新增重新打开",
+    "新增待验收+持续测试\n<font color='purple'>⬤</font>待验收+持续测试",
+    "每日新增已关闭\n<font color='green'>⬤</font>新增已关闭",
   ];
 
   for (let row = 0; row < 2; row++) {
     elements.push({
       tag: "column_set", flex_mode: "none", horizontal_spacing: "small",
-      columns: [0, 1, 2].map((col) => ({
-        tag: "column", width: "weighted", weight: 1,
-        elements: [{ tag: "chart", aspect_ratio: "4:3", chart_spec: charts[row * 3 + col] }],
-      })),
+      columns: [0, 1, 2].map((col) => {
+        const idx = row * 3 + col;
+        return {
+          tag: "column", width: "weighted", weight: 1,
+          elements: [
+            { tag: "note", elements: [{ tag: "lark_md", content: chartLabels[idx] }] },
+            { tag: "chart", aspect_ratio: "4:3", chart_spec: charts[idx] },
+          ],
+        };
+      }),
     });
   }
 
@@ -492,9 +574,9 @@ function createLineChart(canvasId, labels, datasets, yConfig = {}) {
 
 function calcStackedLayers(history) {
   const solving = history.map((h) => h.unresolved + h.reopened);
-  const verifying = history.map((h) => h.pending + h.testing + h.reviewing);
-  const otherGroup = history.map((h) => h.wontfix + h.dupLink);
-  const closedGroup = history.map((h, i) => Math.max(0, h.total - solving[i] - verifying[i] - otherGroup[i]));
+  const verifying = history.map((h) => h.pending + h.testing + h.testingOld + h.reviewing + h.tempVerify + h.needLog);
+  const closedGroup = history.map((h) => h.byDesign + h.wontfix + h.closed + h.invalid);
+  const otherGroup = history.map((h) => h.dupLink + (h.missing || 0));
   return { solving, verifying, otherGroup, closedGroup };
 }
 
@@ -673,9 +755,33 @@ async function refresh(silent = false) {
     const data = await fetchCurrentData();
     latestData = data;
     updateCards(data.total, data.unresolved, data.reopened, data.ratio);
-    await saveSnapshot(data);
     setStatus(`已自动更新 · ${new Date().toLocaleTimeString()}`, "success");
     const history = await loadHistory();
+
+    const today = new Date().toISOString().slice(0, 10);
+    const todayIdx = history.findIndex(h => h.date === today);
+    const trackedSum = data.unresolved + data.reopened + data.pending + data.testing + data.testingOld +
+      data.reviewing + data.wontfix + data.dupLink + data.byDesign + data.closed + data.invalid +
+      data.tempVerify + data.needLog;
+    const liveEntry = {
+      date: today, total: data.total, unresolved: data.unresolved, pending: data.pending,
+      reopened: data.reopened, ratio: data.ratio, testing: data.testing, reviewing: data.reviewing,
+      wontfix: data.wontfix, dupLink: data.dupLink, byDesign: data.byDesign, closed: data.closed,
+      invalid: data.invalid, testingOld: data.testingOld, tempVerify: data.tempVerify, needLog: data.needLog,
+      missing: data.total - trackedSum,
+      toUnresolved: 0, toPending: 0, toReopened: 0, toClosed: 0, toTesting: 0,
+    };
+    if (todayIdx >= 0) {
+      liveEntry.toUnresolved = history[todayIdx].toUnresolved;
+      liveEntry.toPending = history[todayIdx].toPending;
+      liveEntry.toReopened = history[todayIdx].toReopened;
+      liveEntry.toClosed = history[todayIdx].toClosed;
+      liveEntry.toTesting = history[todayIdx].toTesting;
+      history[todayIdx] = liveEntry;
+    } else {
+      history.push(liveEntry);
+    }
+
     latestHistory = history;
     if (history.length > 0) {
       renderCharts(history);
@@ -710,9 +816,65 @@ function setSettingsStatus(msg, type = "") {
   settingsStatusEl.className = `settings-status ${type}`;
 }
 
+function renderStatsTable(history) {
+  const container = document.getElementById("statsTable");
+  if (!history || history.length === 0) {
+    container.innerHTML = "<div style='padding:12px;color:#8f959e;font-size:11px'>暂无数据</div>";
+    return;
+  }
+  const rows = [...history].reverse();
+  const cols = [
+    { key: "date", label: "日期" },
+    { key: "unresolved", label: "未解决" },
+    { key: "reopened", label: "重新打开" },
+    { key: "pending", label: "待验收" },
+    { key: "testingOld", label: "未复现，持续测试" },
+    { key: "reviewing", label: "待评审" },
+    { key: "testing", label: "已回归，持续测试" },
+    { key: "tempVerify", label: "临时版本验证" },
+    { key: "needLog", label: "需补充日志" },
+    { key: "dupLink", label: "双连接" },
+    { key: "byDesign", label: "设计如此" },
+    { key: "wontfix", label: "暂不修复" },
+    { key: "closed", label: "已关闭" },
+    { key: "invalid", label: "无效问题" },
+    { key: "missing", label: "消失的状态" },
+    { key: "total", label: "总数" },
+  ];
+  const thRow = cols.map((c) => `<th>${c.label}</th>`).join("");
+  const bodyRows = rows.map((h) => {
+    const vals = {
+      date: h.date.slice(5), unresolved: h.unresolved, reopened: h.reopened,
+      pending: h.pending, testingOld: h.testingOld, reviewing: h.reviewing,
+      testing: h.testing, tempVerify: h.tempVerify, needLog: h.needLog,
+      dupLink: h.dupLink, byDesign: h.byDesign, wontfix: h.wontfix,
+      closed: h.closed, invalid: h.invalid, missing: h.missing || 0, total: h.total,
+    };
+    return "<tr>" + cols.map((c) => `<td>${vals[c.key]}</td>`).join("") + "</tr>";
+  }).join("");
+  container.innerHTML = `<table class="stats-table"><thead><tr>${thRow}</tr></thead><tbody>${bodyRows}</tbody></table>`;
+}
+
+function exportExcel(history) {
+  if (!history || history.length === 0) return;
+  const headers = ["日期","未解决","重新打开","待验收","未复现，持续测试","待评审","已回归，持续测试","临时版本验证","需补充日志","双连接，5月份开始处理","设计如此","暂不修复","已关闭","无效问题","消失的状态","总数"];
+  const rows = [...history].reverse().map((h) => [
+    h.date, h.unresolved, h.reopened, h.pending, h.testingOld, h.reviewing,
+    h.testing, h.tempVerify, h.needLog, h.dupLink, h.byDesign, h.wontfix,
+    h.closed, h.invalid, h.missing || 0, h.total,
+  ]);
+  const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+  const colWidths = [12, 8, 8, 8, 14, 8, 14, 10, 10, 16, 8, 8, 8, 8, 10, 8];
+  ws["!cols"] = colWidths.map((w) => ({ wch: w }));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Bug Stats");
+  XLSX.writeFile(wb, `bug_stats_${new Date().toISOString().slice(0, 10)}.xlsx`);
+}
+
 document.getElementById("settingsBtn").addEventListener("click", async () => {
   settingsModal.classList.add("open");
   setSettingsStatus("");
+  renderStatsTable(latestHistory);
   try {
     const url = await loadWebhookUrl();
     webhookInput.value = url;
@@ -751,6 +913,8 @@ document.getElementById("sendNowBtn").addEventListener("click", async () => {
     setSettingsStatus(`发送失败: ${e.message}`, "error");
   }
 });
+
+document.getElementById("exportBtn").addEventListener("click", () => exportExcel(latestHistory));
 
 refresh(false);
 setInterval(() => refresh(true), 60000);
