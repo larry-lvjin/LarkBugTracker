@@ -1,0 +1,10 @@
+/*
+  Content-Security-Policy: frame-ancestors 'self' https://*.feishu.cn https://*.larksuite.com https://*.feishu.net https://*.feishu-pre.com https://*.larkoffice.com
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/index.html
+  Cache-Control: no-cache
