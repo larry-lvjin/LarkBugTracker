@@ -123,7 +123,7 @@ async function ensureFields(token, tableId) {
     { method: "GET", headers: authHeaders(token) }
   );
   const existing = data.data.items.map((f) => f.field_name);
-  for (const name of ["待验收", "持续测试", "待评审", "暂不修复", "双连接", "设计如此", "已关闭", "无效问题", "未复现持续测试", "临时版本验证", "需补充日志", "消失的状态", "其他到未解决", "其他到待验收", "其他到重新打开", "其他到已关闭", "其他到持续测试"]) {
+  for (const name of ["待验收", "持续测试", "待评审", "暂不修复", "双连接", "设计如此", "已关闭", "无效问题", "未复现持续测试", "临时版本验证", "需补充日志", "已修复，待发版", "其他到未解决", "其他到待验收", "其他到重新打开", "其他到已关闭", "其他到持续测试"]) {
     if (!existing.includes(name)) {
       await request(
         `${FEISHU_API}/bitable/v1/apps/${APP_TOKEN}/tables/${tableId}/fields`,
@@ -275,7 +275,7 @@ async function saveHistoryRecord(token, historyTableId, dateStr, data) {
     "未复现持续测试": data.testingOld,
     "临时版本验证": data.tempVerify,
     "需补充日志": data.needLog,
-    "消失的状态": data.missing,
+    "已修复，待发版": data.missing,
     "新增未解决": data.toUnresolved,
     "每日解决": data.toClosed,
     "其他到未解决": data.toUnresolved,

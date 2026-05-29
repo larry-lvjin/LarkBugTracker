@@ -110,7 +110,7 @@ async function fetchCurrentData() {
 const REQUIRED_HISTORY_FIELDS = [
   "日期", "总数", "未解决", "待验收", "重新打开", "占比(%)",
   "持续测试", "待评审", "暂不修复", "双连接",
-  "设计如此", "已关闭", "无效问题", "未复现持续测试", "临时版本验证", "需补充日志", "消失的状态",
+  "设计如此", "已关闭", "无效问题", "未复现持续测试", "临时版本验证", "需补充日志", "已修复，待发版",
   "其他到未解决", "其他到待验收", "其他到重新打开", "其他到已关闭", "其他到持续测试",
 ];
 
@@ -171,7 +171,7 @@ async function loadHistory() {
     const testingOldField = f("未复现持续测试");
     const tempVerifyField = f("临时版本验证");
     const needLogField = f("需补充日志");
-    const missingField = f("消失的状态");
+    const missingField = f("已修复，待发版");
     const toUnresolvedField = f("其他到未解决");
     const toPendingField = f("其他到待验收");
     const toReopenedField = f("其他到重新打开");
@@ -838,7 +838,7 @@ function renderStatsTable(history) {
     { key: "wontfix", label: "暂不修复" },
     { key: "closed", label: "已关闭" },
     { key: "invalid", label: "无效问题" },
-    { key: "missing", label: "消失的状态" },
+    { key: "missing", label: "已修复，待发版" },
     { key: "total", label: "总数" },
   ];
   const thRow = cols.map((c) => `<th>${c.label}</th>`).join("");
@@ -857,7 +857,7 @@ function renderStatsTable(history) {
 
 function exportExcel(history) {
   if (!history || history.length === 0) return;
-  const headers = ["日期","未解决","重新打开","待验收","未复现，持续测试","待评审","已回归，持续测试","临时版本验证","需补充日志","双连接，5月份开始处理","设计如此","暂不修复","已关闭","无效问题","消失的状态","总数"];
+  const headers = ["日期","未解决","重新打开","待验收","未复现，持续测试","待评审","已回归，持续测试","临时版本验证","需补充日志","双连接，5月份开始处理","设计如此","暂不修复","已关闭","无效问题","已修复，待发版","总数"];
   const rows = [...history].reverse().map((h) => [
     h.date, h.unresolved, h.reopened, h.pending, h.testingOld, h.reviewing,
     h.testing, h.tempVerify, h.needLog, h.dupLink, h.byDesign, h.wontfix,
