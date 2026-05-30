@@ -1,6 +1,6 @@
 /*
-  Content-Security-Policy: frame-ancestors 'self' https://*.feishu.cn https://*.larksuite.com https://*.feishu.net https://*.feishu-pre.com https://*.larkoffice.com
-  X-Content-Type-Options: nosniff
+  X-Plugin-Deploy-Test: cloudflare-headers-active
+  Content-Security-Policy: frame-ancestors *
   Referrer-Policy: strict-origin-when-cross-origin
 
 /assets/*
