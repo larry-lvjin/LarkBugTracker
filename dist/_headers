@@ -1,5 +1,4 @@
 /*
-  X-Plugin-Deploy-Test: cloudflare-headers-active
   Content-Security-Policy: frame-ancestors *
   Referrer-Policy: strict-origin-when-cross-origin
 
