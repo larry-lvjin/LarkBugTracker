@@ -5,6 +5,7 @@ import * as XLSX from "xlsx";
 const HISTORY_TABLE_NAME = "BugStats_History";
 const SETTINGS_TABLE_NAME = "BugStats_Settings";
 const STATUS_FIELD = "问题状态";
+const TRANSITION_START_DATE = "2026-06-03";
 
 let statusAreaChart = null;
 let ratioChart = null;
@@ -67,16 +68,31 @@ function extractCellText(cellValue) {
   return String(cellValue);
 }
 
-async function fetchCurrentData() {
-  const table = await bitable.base.getActiveTable();
-  const fieldMetaList = await table.getFieldMetaList();
-  const statusField = fieldMetaList.find((f) => f.name === STATUS_FIELD);
+async function findBugTable() {
+  const active = await bitable.base.getActiveTable();
+  const activeFields = await active.getFieldMetaList();
+  if (activeFields.some((f) => f.name === STATUS_FIELD)) {
+    return { table: active, fieldMetaList: activeFields };
+  }
+  const tables = await bitable.base.getTableList();
+  for (const t of tables) {
+    const fieldMetaList = await t.getFieldMetaList();
+    if (fieldMetaList.some((f) => f.name === STATUS_FIELD)) {
+      return { table: t, fieldMetaList };
+    }
+  }
+  return null;
+}
 
-  if (!statusField) throw new Error(`找不到「${STATUS_FIELD}」字段`);
+async function fetchCurrentData() {
+  const found = await findBugTable();
+  if (!found) throw new Error(`找不到包含「${STATUS_FIELD}」字段的表`);
+  const { table, fieldMetaList } = found;
+  const statusField = fieldMetaList.find((f) => f.name === STATUS_FIELD);
 
   let total = 0, unresolved = 0, pending = 0, reopened = 0;
   let testing = 0, reviewing = 0, wontfix = 0, dupLink = 0;
-  let byDesign = 0, closed = 0, invalid = 0, testingOld = 0, tempVerify = 0, needLog = 0;
+  let byDesign = 0, closed = 0, invalid = 0, testingOld = 0, tempVerify = 0, needLog = 0, fixedPending = 0;
   let pageToken = undefined;
   let hasMore = true;
 
@@ -98,20 +114,21 @@ async function fetchCurrentData() {
       if (status === "未复现，持续测试") testingOld++;
       if (status === "临时版本验证") tempVerify++;
       if (status === "需补充日志") needLog++;
+      if (status === "已修复，待发版") fixedPending++;
     }
     hasMore = resp.hasMore;
     pageToken = resp.pageToken;
   }
 
   const ratio = total > 0 ? parseFloat((((unresolved + reopened) / total) * 100).toFixed(1)) : 0;
-  return { total, unresolved, pending, reopened, ratio, testing, reviewing, wontfix, dupLink, byDesign, closed, invalid, testingOld, tempVerify, needLog };
+  return { total, unresolved, pending, reopened, ratio, testing, reviewing, wontfix, dupLink, byDesign, closed, invalid, testingOld, tempVerify, needLog, fixedPending };
 }
 
 const REQUIRED_HISTORY_FIELDS = [
   "日期", "总数", "未解决", "待验收", "重新打开", "占比(%)",
   "持续测试", "待评审", "暂不修复", "双连接",
   "设计如此", "已关闭", "无效问题", "未复现持续测试", "临时版本验证", "需补充日志", "已修复，待发版",
-  "其他到未解决", "其他到待验收", "其他到重新打开", "其他到已关闭", "其他到持续测试",
+  "其他到未解决", "其他到待验收", "其他到重新打开", "其他到已关闭", "其他到持续测试", "其他到未复现持续测试",
 ];
 
 async function getOrCreateHistoryTable() {
@@ -177,6 +194,7 @@ async function loadHistory() {
     const toReopenedField = f("其他到重新打开");
     const toClosedField = f("其他到已关闭");
     const toTestingField = f("其他到持续测试");
+    const toTestingOldField = f("其他到未复现持续测试");
 
     if (!dateField || !totalField) return [];
 
@@ -213,6 +231,7 @@ async function loadHistory() {
           toReopened: toReopenedField ? Number(fields[toReopenedField.id]) || 0 : 0,
           toClosed: toClosedField ? Number(fields[toClosedField.id]) || 0 : 0,
           toTesting: toTestingField ? Number(fields[toTestingField.id]) || 0 : 0,
+          toTestingOld: toTestingOldField ? Number(fields[toTestingOldField.id]) || 0 : 0,
         });
       }
       hasMore = resp.hasMore;
@@ -380,7 +399,7 @@ function buildVChartArea(values, title) {
     point: { visible: false },
     label: { visible: false },
     line: { style: { lineWidth: 1.5 } },
-    area: { style: { fillOpacity: 0.35 } },
+    area: { style: { fillOpacity: 1 } },
     axes: [
       { orient: "left", title: { visible: true, text: "数量", style: { fontSize: 10, fill: "#8f959e" } }, label: { style: { fontSize: 9, fill: "#8f959e" } }, grid: { visible: true, style: { lineDash: [], stroke: "#f0f1f3" } } },
       { orient: "bottom", label: { style: { fontSize: 9, fill: "#8f959e" } }, grid: { visible: false } },
@@ -440,8 +459,8 @@ function buildCardMessage(data, history) {
     const date = h.date.slice(5);
     const solving = h.unresolved + h.reopened;
     const verifying = h.pending + h.testing + h.testingOld + h.reviewing + h.tempVerify + h.needLog;
-    const closed = h.byDesign + h.wontfix + h.closed + h.invalid;
-    const other = h.dupLink + (h.missing || 0);
+    const closed = h.byDesign + h.wontfix + h.closed + h.invalid + (h.missing || 0);
+    const other = h.dupLink;
     statusValues.push(
       { date, count: closed, type: "已关闭" },
       { date, count: other, type: "其他" },
@@ -450,22 +469,23 @@ function buildCardMessage(data, history) {
     );
   }
 
+  const th = history.filter((h) => h.date >= TRANSITION_START_DATE);
   const charts = [
     buildVChartArea(statusValues, "Bug 状态分布"),
     buildVChartLine(history.map((h) => ({ date: h.date.slice(5), count: h.ratio, type: "未解决占比(%)" })), "#E879A6", "未解决占比趋势", "%"),
-    buildVChartLine(history.map((h) => ({ date: h.date.slice(5), count: h.toUnresolved, type: "其他到未解决" })), "#FF5C5C", "每日新增未解决"),
-    buildVChartLine(history.map((h) => ({ date: h.date.slice(5), count: h.toReopened, type: "其他到重新打开" })), "#F59F00", "每日新增重新打开"),
-    buildVChartLine(history.map((h) => ({ date: h.date.slice(5), count: h.toPending + h.toTesting, type: "其他到待验收+持续测试" })), "#B45BD5", "每日新增待验收+持续测试"),
-    buildVChartLine(history.map((h) => ({ date: h.date.slice(5), count: h.toClosed, type: "其他到已关闭" })), "#2DB87F", "每日新增已关闭"),
+    buildVChartLine(th.map((h) => ({ date: h.date.slice(5), count: h.toUnresolved, type: "未解决变化" })), "#FF5C5C", "未解决变化"),
+    buildVChartLine(th.map((h) => ({ date: h.date.slice(5), count: h.toReopened, type: "重新打开变化" })), "#F59F00", "重新打开变化"),
+    buildVChartLine(th.map((h) => ({ date: h.date.slice(5), count: h.toPending + h.toTesting + (h.toTestingOld || 0), type: "待验收+持续测试变化" })), "#B45BD5", "待验收+持续测试变化"),
+    buildVChartLine(th.map((h) => ({ date: h.date.slice(5), count: h.toClosed, type: "已关闭变化" })), "#2DB87F", "已关闭变化"),
   ];
 
   const chartLabels = [
     "Bug 状态分布\n<font color='red'>⬤</font>解决中<font color='orange'>⬤</font>验证中<font color='grey'>⬤</font>其他<font color='green'>⬤</font>已关闭",
     "未解决占比趋势\n<font color='carmine'>⬤</font>占比(%)",
-    "每日新增未解决\n<font color='red'>⬤</font>新增未解决",
-    "每日新增重新打开\n<font color='orange'>⬤</font>新增重新打开",
-    "新增待验收+持续测试\n<font color='purple'>⬤</font>待验收+持续测试",
-    "每日新增已关闭\n<font color='green'>⬤</font>新增已关闭",
+    "未解决变化\n<font color='red'>⬤</font>未解决变化",
+    "重新打开变化\n<font color='orange'>⬤</font>重新打开变化",
+    "待验收+持续测试变化\n<font color='purple'>⬤</font>待验收+持续测试变化",
+    "已关闭变化\n<font color='green'>⬤</font>已关闭变化",
   ];
 
   for (let row = 0; row < 2; row++) {
@@ -575,17 +595,17 @@ function createLineChart(canvasId, labels, datasets, yConfig = {}) {
 function calcStackedLayers(history) {
   const solving = history.map((h) => h.unresolved + h.reopened);
   const verifying = history.map((h) => h.pending + h.testing + h.testingOld + h.reviewing + h.tempVerify + h.needLog);
-  const closedGroup = history.map((h) => h.byDesign + h.wontfix + h.closed + h.invalid);
-  const otherGroup = history.map((h) => h.dupLink + (h.missing || 0));
+  const closedGroup = history.map((h) => h.byDesign + h.wontfix + h.closed + h.invalid + (h.missing || 0));
+  const otherGroup = history.map((h) => h.dupLink);
   return { solving, verifying, otherGroup, closedGroup };
 }
 
 function stackedDatasets(layers) {
   return [
-    { label: "已关闭", data: layers.closedGroup, borderColor: "#2DB87F", backgroundColor: "rgba(45,184,127,0.35)", fill: true, borderWidth: 1.5, pointRadius: 1, tension: 0 },
-    { label: "其他", data: layers.otherGroup, borderColor: "#9CA3AF", backgroundColor: "rgba(156,163,175,0.35)", fill: true, borderWidth: 1.5, pointRadius: 1, tension: 0 },
-    { label: "验证中", data: layers.verifying, borderColor: "#F59F00", backgroundColor: "rgba(245,159,0,0.35)", fill: true, borderWidth: 1.5, pointRadius: 1, tension: 0 },
-    { label: "解决中", data: layers.solving, borderColor: "#FF5C5C", backgroundColor: "rgba(255,92,92,0.35)", fill: true, borderWidth: 1.5, pointRadius: 1, tension: 0 },
+    { label: "已关闭", data: layers.closedGroup, borderColor: "#2DB87F", backgroundColor: "#2DB87F", fill: true, borderWidth: 1.5, pointRadius: 1, tension: 0 },
+    { label: "其他", data: layers.otherGroup, borderColor: "#9CA3AF", backgroundColor: "#9CA3AF", fill: true, borderWidth: 1.5, pointRadius: 1, tension: 0 },
+    { label: "验证中", data: layers.verifying, borderColor: "#F59F00", backgroundColor: "#F59F00", fill: true, borderWidth: 1.5, pointRadius: 1, tension: 0 },
+    { label: "解决中", data: layers.solving, borderColor: "#FF5C5C", backgroundColor: "#FF5C5C", fill: true, borderWidth: 1.5, pointRadius: 1, tension: 0 },
   ];
 }
 
@@ -721,21 +741,24 @@ function renderCharts(history) {
     tooltipCallbacks: { label: (ctx) => `${ctx.dataset.label}: ${ctx.parsed.y}%` },
   };
 
-  const unresolvedData = [ds("其他到未解决", history.map((h) => h.toUnresolved), "#FF5C5C")];
-  newUnresolvedChart = createLineChart("newUnresolvedChart", labels, unresolvedData, { title: "数量" });
-  chartConfigs.newUnresolved = { title: "每日新增未解决", labels, yTitle: "数量", datasets: unresolvedData };
+  const th = history.filter((h) => h.date >= TRANSITION_START_DATE);
+  const tLabels = makeLabels(th);
 
-  const reopenedData = [ds("其他到重新打开", history.map((h) => h.toReopened), "#F59F00")];
-  newReopenedChart = createLineChart("newReopenedChart", labels, reopenedData, { title: "数量" });
-  chartConfigs.newReopened = { title: "每日新增重新打开", labels, yTitle: "数量", datasets: reopenedData };
+  const unresolvedData = [ds("未解决变化", th.map((h) => h.toUnresolved), "#FF5C5C")];
+  newUnresolvedChart = createLineChart("newUnresolvedChart", tLabels, unresolvedData, { title: "数量" });
+  chartConfigs.newUnresolved = { title: "未解决变化", labels: tLabels, yTitle: "数量", datasets: unresolvedData };
 
-  const verifyData = [ds("其他到待验收+持续测试", history.map((h) => h.toPending + h.toTesting), "#B45BD5")];
-  newVerifyChart = createLineChart("newVerifyChart", labels, verifyData, { title: "数量" });
-  chartConfigs.newVerify = { title: "每日新增待验收+持续测试", labels, yTitle: "数量", datasets: verifyData };
+  const reopenedData = [ds("重新打开变化", th.map((h) => h.toReopened), "#F59F00")];
+  newReopenedChart = createLineChart("newReopenedChart", tLabels, reopenedData, { title: "数量" });
+  chartConfigs.newReopened = { title: "重新打开变化", labels: tLabels, yTitle: "数量", datasets: reopenedData };
 
-  const closedData = [ds("其他到已关闭", history.map((h) => h.toClosed), "#2DB87F")];
-  newClosedChart = createLineChart("newClosedChart", labels, closedData, { title: "数量" });
-  chartConfigs.newClosed = { title: "每日新增已关闭", labels, yTitle: "数量", datasets: closedData };
+  const verifyData = [ds("待验收+持续测试变化", th.map((h) => h.toPending + h.toTesting + (h.toTestingOld || 0)), "#B45BD5")];
+  newVerifyChart = createLineChart("newVerifyChart", tLabels, verifyData, { title: "数量" });
+  chartConfigs.newVerify = { title: "待验收+持续测试变化", labels: tLabels, yTitle: "数量", datasets: verifyData };
+
+  const closedData = [ds("已关闭变化", th.map((h) => h.toClosed), "#2DB87F")];
+  newClosedChart = createLineChart("newClosedChart", tLabels, closedData, { title: "数量" });
+  chartConfigs.newClosed = { title: "已关闭变化", labels: tLabels, yTitle: "数量", datasets: closedData };
 
   document.getElementById("historyInfo").textContent = `共 ${history.length} 条历史记录`;
 }
@@ -762,14 +785,14 @@ async function refresh(silent = false) {
     const todayIdx = history.findIndex(h => h.date === today);
     const trackedSum = data.unresolved + data.reopened + data.pending + data.testing + data.testingOld +
       data.reviewing + data.wontfix + data.dupLink + data.byDesign + data.closed + data.invalid +
-      data.tempVerify + data.needLog;
+      data.tempVerify + data.needLog + data.fixedPending;
     const liveEntry = {
       date: today, total: data.total, unresolved: data.unresolved, pending: data.pending,
       reopened: data.reopened, ratio: data.ratio, testing: data.testing, reviewing: data.reviewing,
       wontfix: data.wontfix, dupLink: data.dupLink, byDesign: data.byDesign, closed: data.closed,
       invalid: data.invalid, testingOld: data.testingOld, tempVerify: data.tempVerify, needLog: data.needLog,
-      missing: data.total - trackedSum,
-      toUnresolved: 0, toPending: 0, toReopened: 0, toClosed: 0, toTesting: 0,
+      missing: data.fixedPending + Math.max(0, data.total - trackedSum),
+      toUnresolved: 0, toPending: 0, toReopened: 0, toClosed: 0, toTesting: 0, toTestingOld: 0,
     };
     if (todayIdx >= 0) {
       liveEntry.toUnresolved = history[todayIdx].toUnresolved;
@@ -777,6 +800,7 @@ async function refresh(silent = false) {
       liveEntry.toReopened = history[todayIdx].toReopened;
       liveEntry.toClosed = history[todayIdx].toClosed;
       liveEntry.toTesting = history[todayIdx].toTesting;
+      liveEntry.toTestingOld = history[todayIdx].toTestingOld;
       history[todayIdx] = liveEntry;
     } else {
       history.push(liveEntry);

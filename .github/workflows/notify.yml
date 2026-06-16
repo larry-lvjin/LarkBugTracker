@@ -1,9 +1,8 @@
 name: Daily Bug Notification
 
 on:
-  schedule:
-    - cron: '3 1 * * *'  # UTC 01:03 = Beijing 09:03
-  workflow_dispatch:       # Allow manual trigger
+  repository_dispatch:
+    types: [daily-notify]  # 飞书定时自动化触发（唯一触发源）
 
 jobs:
   notify:

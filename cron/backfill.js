@@ -120,6 +120,7 @@ function buildDailySets(records) {
     return s;
   };
   let prevSets = emptyStatusSets();
+  let prevCounts = { unresolved: 0, pending: 0, reopened: 0, closedGroup: 0, testing: 0, testingOld: 0 };
 
   while (current <= end) {
     const dateStr = formatDate(current);
@@ -151,26 +152,21 @@ function buildDailySets(records) {
     const missing = total - tracked;
     const ratio = total > 0 ? parseFloat((((unresolved + reopened) / total) * 100).toFixed(1)) : 0;
 
-    const setDiff = (today, yesterday) => {
-      let count = 0;
-      for (const id of today) { if (!yesterday.has(id)) count++; }
-      return count;
-    };
-
-    const closedAll = new Set([...todaySets["已关闭"], ...todaySets["设计如此"], ...todaySets["暂不修复"], ...todaySets["无效问题"]]);
-    const prevClosedAll = new Set([...prevSets["已关闭"], ...prevSets["设计如此"], ...prevSets["暂不修复"], ...prevSets["无效问题"]]);
+    const closedGroup = byDesign + wontfix + closed + invalid + missing;
 
     results.push({
       date: dateStr, total, unresolved, pending, reopened, closed, ratio,
       testing, testingOld, byDesign, wontfix, invalid, reviewing, tempVerify, needLog, dupLink, missing,
-      toUnresolved: setDiff(todaySets["未解决"], prevSets["未解决"]),
-      toPending: setDiff(todaySets["待验收"], prevSets["待验收"]),
-      toReopened: setDiff(todaySets["重新打开"], prevSets["重新打开"]),
-      toClosed: setDiff(closedAll, prevClosedAll),
-      toTesting: setDiff(todaySets["已回归，持续测试"], prevSets["已回归，持续测试"]),
+      toUnresolved: 0,
+      toPending: 0,
+      toReopened: 0,
+      toClosed: 0,
+      toTesting: 0,
+      toTestingOld: 0,
     });
 
     prevSets = todaySets;
+    prevCounts = { unresolved, pending, reopened, closedGroup, testing, testingOld };
     current.setDate(current.getDate() + 1);
   }
 
@@ -289,6 +285,7 @@ async function main() {
     { name: "其他到重新打开", type: 2 },
     { name: "其他到已关闭", type: 2 },
     { name: "其他到持续测试", type: 2 },
+    { name: "其他到未复现持续测试", type: 2 },
   ]);
 
   console.log("Clearing old history records...");
@@ -320,6 +317,7 @@ async function main() {
       "其他到重新打开": s.toReopened,
       "其他到已关闭": s.toClosed,
       "其他到持续测试": s.toTesting || 0,
+      "其他到未复现持续测试": s.toTestingOld || 0,
     },
   }));
 

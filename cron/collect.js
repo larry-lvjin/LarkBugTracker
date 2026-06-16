@@ -5,7 +5,14 @@ const APP_TOKEN = "E8mgb7Zoxa0ZhLsND7wcOuxKnee";
 const BUG_TABLE_ID = "tbldjYSgIe55Qbcm";
 const BUG_VIEW_ID = "vewUHHFITx";
 const HISTORY_TABLE_NAME = "BugStats_History";
-const SNAPSHOT_TABLE_NAME = "BugStats_Snapshot";
+const MATRIX_TABLE_NAME = "BugStats_DailyMatrix";
+
+// Before this date the matrix-based transitions are not reliable:
+// 2026-06-10 is the bootstrap day (no yesterday baseline);
+// 2026-06-11's yesterday baseline is the bootstrap snapshot (mid-day 06-10), not an EOD snapshot,
+// so 06-11 transitions would conflate ~1.5 days of activity.
+// First date where transitions = diff(EOD today, EOD yesterday) is truthful: 2026-06-12.
+const FIRST_TRUTHFUL_DATE = "2026-06-12";
 
 async function request(url, options = {}) {
   const resp = await fetch(url, options);
@@ -46,7 +53,7 @@ function formatDate(d) { return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${p
 function getBeijingDate() {
   const now = new Date();
   const beijing = new Date(now.getTime() + 8 * 3600 * 1000);
-  return formatDate(beijing);
+  return `${beijing.getUTCFullYear()}-${pad(beijing.getUTCMonth() + 1)}-${pad(beijing.getUTCDate())}`;
 }
 
 async function fetchAllRecords(token) {
@@ -64,7 +71,7 @@ async function fetchAllRecords(token) {
   return records;
 }
 
-const CLOSED_STATUSES = ["已关闭", "设计如此", "暂不修复", "无效问题"];
+const CLOSED_STATUSES = ["已关闭", "设计如此", "暂不修复", "无效问题", "已修复，待发版"];
 
 function analyzeRecords(records) {
   const sets = {
@@ -72,7 +79,7 @@ function analyzeRecords(records) {
     "已回归，持续测试": new Set(), "未复现，持续测试": new Set(),
   };
   let testing = 0, testingOld = 0, reviewing = 0, wontfix = 0, dupLink = 0;
-  let byDesign = 0, closed = 0, invalid = 0, tempVerify = 0, needLog = 0;
+  let byDesign = 0, closed = 0, invalid = 0, tempVerify = 0, needLog = 0, fixedPending = 0;
   for (const record of records) {
     const status = extractText(record.fields["问题状态"]);
     const id = record.record_id;
@@ -88,24 +95,119 @@ function analyzeRecords(records) {
     if (status === "无效问题") invalid++;
     if (status === "临时版本验证") tempVerify++;
     if (status === "需补充日志") needLog++;
+    if (status === "已修复，待发版") fixedPending++;
   }
-  return { total: records.length, sets, testing, testingOld, reviewing, wontfix, dupLink, byDesign, closed, invalid, tempVerify, needLog };
+  return { total: records.length, sets, testing, testingOld, reviewing, wontfix, dupLink, byDesign, closed, invalid, tempVerify, needLog, fixedPending };
 }
 
-function computeTransitions(todaySets, yesterdaySets) {
-  const diff = (today, yesterday) => {
-    let count = 0;
-    for (const id of today) { if (!yesterday.has(id)) count++; }
-    return count;
-  };
-  return {
-    toUnresolved: diff(todaySets["未解决"], yesterdaySets["未解决"]),
-    toPending: diff(todaySets["待验收"], yesterdaySets["待验收"]),
-    toReopened: diff(todaySets["重新打开"], yesterdaySets["重新打开"]),
-    toClosed: diff(todaySets["已关闭"], yesterdaySets["已关闭"]),
-    toTesting: diff(todaySets["已回归，持续测试"], yesterdaySets["已回归，持续测试"]),
-    toTestingOld: diff(todaySets["未复现，持续测试"], yesterdaySets["未复现，持续测试"]),
-  };
+function getBeijingYesterday(todayStr) {
+  const [y, m, d] = todayStr.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d) - 24 * 3600 * 1000);
+  return `${dt.getUTCFullYear()}-${pad(dt.getUTCMonth() + 1)}-${pad(dt.getUTCDate())}`;
+}
+
+async function ensureDateField(token, matrixTableId, dateStr) {
+  const data = await request(
+    `${FEISHU_API}/bitable/v1/apps/${APP_TOKEN}/tables/${matrixTableId}/fields?page_size=500`,
+    { method: "GET", headers: authHeaders(token) }
+  );
+  if (data.data.items.some((f) => f.field_name === dateStr)) return false;
+  await request(
+    `${FEISHU_API}/bitable/v1/apps/${APP_TOKEN}/tables/${matrixTableId}/fields`,
+    { method: "POST", headers: authHeaders(token), body: JSON.stringify({ field_name: dateStr, type: 1 }) }
+  );
+  console.log(`Created matrix field "${dateStr}"`);
+  return true;
+}
+
+async function fetchMatrixRows(token, matrixTableId) {
+  const rows = [];
+  let pageToken = undefined;
+  for (let page = 0; page < 500; page++) {
+    let url = `${FEISHU_API}/bitable/v1/apps/${APP_TOKEN}/tables/${matrixTableId}/records?page_size=500`;
+    if (pageToken) url += `&page_token=${pageToken}`;
+    const data = await request(url, { method: "GET", headers: authHeaders(token) });
+    rows.push(...(data.data.items || []));
+    console.log(`  Matrix page ${page + 1}: +${data.data.items?.length || 0}, total=${rows.length}`);
+    if (!data.data.has_more || !data.data.page_token) break;
+    pageToken = data.data.page_token;
+  }
+  const byBugId = new Map();
+  let dupCount = 0;
+  for (const r of rows) {
+    const bugId = extractText(r.fields["记录ID"]);
+    if (!bugId) continue;
+    if (byBugId.has(bugId)) dupCount++;
+    byBugId.set(bugId, { matrixRecordId: r.record_id, fields: r.fields });
+  }
+  if (dupCount > 0) console.log(`⚠️  Matrix has ${dupCount} duplicate rows (same 记录ID)`);
+  return { rows, byBugId };
+}
+
+async function batchCreate(token, matrixTableId, payloads) {
+  for (let i = 0; i < payloads.length; i += 100) {
+    const batch = payloads.slice(i, i + 100);
+    await request(
+      `${FEISHU_API}/bitable/v1/apps/${APP_TOKEN}/tables/${matrixTableId}/records/batch_create`,
+      { method: "POST", headers: authHeaders(token), body: JSON.stringify({ records: batch }) }
+    );
+    console.log(`  Matrix create: ${Math.min(i + 100, payloads.length)}/${payloads.length}`);
+  }
+}
+
+async function batchUpdate(token, matrixTableId, payloads) {
+  for (let i = 0; i < payloads.length; i += 100) {
+    const batch = payloads.slice(i, i + 100);
+    await request(
+      `${FEISHU_API}/bitable/v1/apps/${APP_TOKEN}/tables/${matrixTableId}/records/batch_update`,
+      { method: "POST", headers: authHeaders(token), body: JSON.stringify({ records: batch }) }
+    );
+    console.log(`  Matrix update: ${Math.min(i + 100, payloads.length)}/${payloads.length}`);
+  }
+}
+
+async function writeDailyMatrix(token, matrixTableId, dateStr, bugRecords, byBugId) {
+  const toCreate = [];
+  const toUpdate = [];
+  for (const r of bugRecords) {
+    const bugId = r.record_id;
+    const status = extractText(r.fields["问题状态"]);
+    const desc = extractText(r.fields["问题描述"]);
+    const existing = byBugId.get(bugId);
+    if (existing) {
+      toUpdate.push({ record_id: existing.matrixRecordId, fields: { [dateStr]: status } });
+    } else {
+      toCreate.push({ fields: { "记录ID": bugId, "问题描述": desc, [dateStr]: status } });
+    }
+  }
+  console.log(`Writing daily matrix: ${toCreate.length} new rows, ${toUpdate.length} updates`);
+  if (toCreate.length > 0) await batchCreate(token, matrixTableId, toCreate);
+  if (toUpdate.length > 0) await batchUpdate(token, matrixTableId, toUpdate);
+  return { created: toCreate.length, updated: toUpdate.length };
+}
+
+function computeTransitionsFromMatrix(bugRecords, byBugId, todayStr, yesterdayStr) {
+  const t = { toUnresolved: 0, toPending: 0, toReopened: 0, toClosed: 0, toTesting: 0, toTestingOld: 0 };
+  let yestPresent = 0;
+  for (const r of bugRecords) {
+    const today = extractText(r.fields["问题状态"]);
+    const prev = byBugId.get(r.record_id);
+    const yest = prev ? extractText(prev.fields[yesterdayStr]) : "";
+    if (yest) yestPresent++;
+    if (!today || today === yest) continue;
+    if (today === "未解决") t.toUnresolved++;
+    else if (today === "待验收") t.toPending++;
+    else if (today === "重新打开") t.toReopened++;
+    else if (today === "已回归，持续测试") t.toTesting++;
+    else if (today === "未复现，持续测试") t.toTestingOld++;
+    if (CLOSED_STATUSES.includes(today) && !CLOSED_STATUSES.includes(yest)) t.toClosed++;
+  }
+  if (yestPresent === 0) {
+    console.log(`⚠️  No yesterday (${yesterdayStr}) data in matrix — bootstrap day, transitions = 0`);
+    return { toUnresolved: 0, toPending: 0, toReopened: 0, toClosed: 0, toTesting: 0, toTestingOld: 0 };
+  }
+  console.log(`Matrix yesterday-column populated for ${yestPresent}/${bugRecords.length} bugs`);
+  return t;
 }
 
 async function getTableId(token, tableName) {
@@ -123,7 +225,7 @@ async function ensureFields(token, tableId) {
     { method: "GET", headers: authHeaders(token) }
   );
   const existing = data.data.items.map((f) => f.field_name);
-  for (const name of ["待验收", "持续测试", "待评审", "暂不修复", "双连接", "设计如此", "已关闭", "无效问题", "未复现持续测试", "临时版本验证", "需补充日志", "已修复，待发版", "其他到未解决", "其他到待验收", "其他到重新打开", "其他到已关闭", "其他到持续测试"]) {
+  for (const name of ["待验收", "持续测试", "待评审", "暂不修复", "双连接", "设计如此", "已关闭", "无效问题", "未复现持续测试", "临时版本验证", "需补充日志", "已修复，待发版", "其他到未解决", "其他到待验收", "其他到重新打开", "其他到已关闭", "其他到持续测试", "其他到未复现持续测试"]) {
     if (!existing.includes(name)) {
       await request(
         `${FEISHU_API}/bitable/v1/apps/${APP_TOKEN}/tables/${tableId}/fields`,
@@ -131,112 +233,6 @@ async function ensureFields(token, tableId) {
       );
       console.log(`Added field: ${name}`);
     }
-  }
-}
-
-async function loadSnapshot(token, snapshotTableId, dateStr) {
-  const emptySets = { "未解决": new Set(), "待验收": new Set(), "重新打开": new Set(), "已关闭": new Set(), "已回归，持续测试": new Set(), "未复现，持续测试": new Set() };
-  let pageToken = undefined;
-  for (let page = 0; page < 10; page++) {
-    const body = { page_size: 200 };
-    if (pageToken) body.page_token = pageToken;
-    const data = await request(
-      `${FEISHU_API}/bitable/v1/apps/${APP_TOKEN}/tables/${snapshotTableId}/records/search`,
-      { method: "POST", headers: authHeaders(token), body: JSON.stringify(body) }
-    ).catch(() => ({ data: { items: [], has_more: false } }));
-    for (const r of data.data.items || []) {
-      const d = extractText(r.fields["日期"]);
-      if (d && d.slice(0, 10) === dateStr) {
-        const parse = (field) => {
-          const val = extractText(r.fields[field]);
-          return val ? new Set(val.split(",").filter(Boolean)) : new Set();
-        };
-        return {
-          "未解决": parse("未解决_ids"),
-          "待验收": parse("待验收_ids"),
-          "重新打开": parse("重新打开_ids"),
-          "已关闭": parse("已关闭_ids"),
-          "已回归，持续测试": parse("持续测试_ids"),
-          "未复现，持续测试": parse("未复现持续测试_ids"),
-        };
-      }
-    }
-    if (!data.data.has_more) break;
-    pageToken = data.data.page_token;
-  }
-  console.log(`No snapshot found for ${dateStr}, using empty sets`);
-  return emptySets;
-}
-
-async function saveSnapshot(token, snapshotTableId, dateStr, sets) {
-  let existingId = null;
-  let pageToken = undefined;
-  for (let page = 0; page < 10; page++) {
-    const body = { page_size: 200 };
-    if (pageToken) body.page_token = pageToken;
-    const data = await request(
-      `${FEISHU_API}/bitable/v1/apps/${APP_TOKEN}/tables/${snapshotTableId}/records/search`,
-      { method: "POST", headers: authHeaders(token), body: JSON.stringify(body) }
-    ).catch(() => ({ data: { items: [], has_more: false } }));
-    for (const r of data.data.items || []) {
-      const d = extractText(r.fields["日期"]);
-      if (d && d.slice(0, 10) === dateStr) { existingId = r.record_id; break; }
-    }
-    if (existingId || !data.data.has_more) break;
-    pageToken = data.data.page_token;
-  }
-
-  const fields = {
-    "日期": dateStr,
-    "未解决_ids": Array.from(sets["未解决"]).join(","),
-    "待验收_ids": Array.from(sets["待验收"]).join(","),
-    "重新打开_ids": Array.from(sets["重新打开"]).join(","),
-    "已关闭_ids": Array.from(sets["已关闭"]).join(","),
-    "持续测试_ids": Array.from(sets["已回归，持续测试"]).join(","),
-    "未复现持续测试_ids": Array.from(sets["未复现，持续测试"]).join(","),
-  };
-
-  if (existingId) {
-    await request(
-      `${FEISHU_API}/bitable/v1/apps/${APP_TOKEN}/tables/${snapshotTableId}/records/${existingId}`,
-      { method: "PUT", headers: authHeaders(token), body: JSON.stringify({ fields }) }
-    );
-  } else {
-    await request(
-      `${FEISHU_API}/bitable/v1/apps/${APP_TOKEN}/tables/${snapshotTableId}/records`,
-      { method: "POST", headers: authHeaders(token), body: JSON.stringify({ fields }) }
-    );
-  }
-}
-
-async function cleanOldSnapshots(token, snapshotTableId, keepDays) {
-  const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() - keepDays);
-  const cutoffStr = formatDate(cutoff);
-
-  const toDelete = [];
-  let pageToken = undefined;
-  for (let page = 0; page < 10; page++) {
-    const body = { page_size: 200 };
-    if (pageToken) body.page_token = pageToken;
-    const data = await request(
-      `${FEISHU_API}/bitable/v1/apps/${APP_TOKEN}/tables/${snapshotTableId}/records/search`,
-      { method: "POST", headers: authHeaders(token), body: JSON.stringify(body) }
-    ).catch(() => ({ data: { items: [], has_more: false } }));
-    for (const r of data.data.items || []) {
-      const d = extractText(r.fields["日期"]);
-      if (d && d.slice(0, 10) < cutoffStr) toDelete.push(r.record_id);
-    }
-    if (!data.data.has_more) break;
-    pageToken = data.data.page_token;
-  }
-
-  if (toDelete.length > 0) {
-    await request(
-      `${FEISHU_API}/bitable/v1/apps/${APP_TOKEN}/tables/${snapshotTableId}/records/batch_delete`,
-      { method: "POST", headers: authHeaders(token), body: JSON.stringify({ records: toDelete }) }
-    );
-    console.log(`Cleaned ${toDelete.length} old snapshots`);
   }
 }
 
@@ -283,6 +279,7 @@ async function saveHistoryRecord(token, historyTableId, dateStr, data) {
     "其他到重新打开": data.toReopened,
     "其他到已关闭": data.toClosed,
     "其他到持续测试": data.toTesting,
+    "其他到未复现持续测试": data.toTestingOld,
   };
 
   if (existingId) {
@@ -302,44 +299,46 @@ async function saveHistoryRecord(token, historyTableId, dateStr, data) {
 
 async function main() {
   const dateStr = getBeijingDate();
-  const yesterday = new Date();
-  yesterday.setDate(yesterday.getDate() - 1);
-  const yesterdayStr = formatDate(new Date(yesterday.getTime() + 8 * 3600 * 1000));
+  const yesterdayStr = getBeijingYesterday(dateStr);
 
-  console.log(`[${new Date().toISOString()}] Collecting data for ${dateStr}...`);
+  console.log(`[${new Date().toISOString()}] Collecting data for ${dateStr} (yesterday=${yesterdayStr})...`);
 
   const token = await getToken();
   const records = await fetchAllRecords(token);
-  const { total, sets, testing, testingOld, reviewing, wontfix, dupLink, byDesign, closed, invalid, tempVerify, needLog } = analyzeRecords(records);
+  const { total, sets, testing, testingOld, reviewing, wontfix, dupLink, byDesign, closed, invalid, tempVerify, needLog, fixedPending } = analyzeRecords(records);
 
   const unresolved = sets["未解决"].size;
   const pending = sets["待验收"].size;
   const reopened = sets["重新打开"].size;
   const ratio = total > 0 ? parseFloat((((unresolved + reopened) / total) * 100).toFixed(1)) : 0;
-  const trackedSum = unresolved + pending + reopened + testing + testingOld + reviewing + wontfix + dupLink + byDesign + closed + invalid + tempVerify + needLog;
-  const missing = total - trackedSum;
+  const missing = fixedPending;
 
-  console.log(`Total: ${total}, 未解决: ${unresolved}, 待验收: ${pending}, 重新打开: ${reopened}, 持续测试: ${testing}, 消失: ${missing}, ratio: ${ratio}%`);
+  console.log(`Total: ${total}, 未解决: ${unresolved}, 待验收: ${pending}, 重新打开: ${reopened}, 持续测试: ${testing}, 已修复待发版: ${missing}, ratio: ${ratio}%`);
+
+  const matrixTableId = await getTableId(token, MATRIX_TABLE_NAME);
+  await ensureDateField(token, matrixTableId, dateStr);
+
+  console.log("Fetching matrix rows...");
+  const { byBugId } = await fetchMatrixRows(token, matrixTableId);
+
+  let transitions;
+  if (dateStr < FIRST_TRUTHFUL_DATE) {
+    console.log(`⚠️  ${dateStr} < FIRST_TRUTHFUL_DATE (${FIRST_TRUTHFUL_DATE}); writing transitions = 0 (matrix baseline not EOD)`);
+    transitions = { toUnresolved: 0, toPending: 0, toReopened: 0, toClosed: 0, toTesting: 0, toTestingOld: 0 };
+  } else {
+    transitions = computeTransitionsFromMatrix(records, byBugId, dateStr, yesterdayStr);
+    console.log(`Transitions: toUnresolved=${transitions.toUnresolved} toPending=${transitions.toPending} toReopened=${transitions.toReopened} toClosed=${transitions.toClosed} toTesting=${transitions.toTesting} toTestingOld=${transitions.toTestingOld}`);
+  }
+
+  await writeDailyMatrix(token, matrixTableId, dateStr, records, byBugId);
 
   const historyTableId = await getTableId(token, HISTORY_TABLE_NAME);
   await ensureFields(token, historyTableId);
-
-  const snapshotTableId = await getTableId(token, SNAPSHOT_TABLE_NAME);
-
-  console.log(`Loading yesterday's snapshot (${yesterdayStr})...`);
-  const yesterdaySets = await loadSnapshot(token, snapshotTableId, yesterdayStr);
-  const transitions = computeTransitions(sets, yesterdaySets);
-
-  console.log(`Transitions: toUnresolved=${transitions.toUnresolved} toPending=${transitions.toPending} toReopened=${transitions.toReopened} toClosed=${transitions.toClosed}`);
 
   await saveHistoryRecord(token, historyTableId, dateStr, {
     total, unresolved, pending, reopened, ratio, testing, testingOld, reviewing, wontfix, dupLink, byDesign, closed, invalid, tempVerify, needLog, missing, ...transitions,
   });
 
-  console.log("Saving today's snapshot...");
-  await saveSnapshot(token, snapshotTableId, dateStr, sets);
-
-  await cleanOldSnapshots(token, snapshotTableId, 7);
   console.log("Done!");
 }
 
