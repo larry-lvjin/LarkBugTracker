@@ -106,18 +106,58 @@ function getBeijingYesterday(todayStr) {
   return `${dt.getUTCFullYear()}-${pad(dt.getUTCMonth() + 1)}-${pad(dt.getUTCDate())}`;
 }
 
+// Feishu single-select color palette (matching source bug table's 问题状态 colors).
+const COLOR_RED = 22;      // 未解决_新
+const COLOR_YELLOW = 23;   // 重新打开_新
+const COLOR_PURPLE = 31;   // 待验收/持续测试_新
+const COLOR_GREEN = 26;    // 已关闭组_新
+const COLOR_DEFAULT = 0;   // plain options
+
+const ALL_STATUSES = [
+  "未解决", "待验收", "重新打开", "已关闭",
+  "已回归，持续测试", "未复现，持续测试",
+  "设计如此", "暂不修复", "无效问题", "已修复，待发版",
+  "待评审", "临时版本验证", "需补充日志", "双连接，5月份开始处理",
+  "录音组跟进",
+];
+
+function newColorOf(status) {
+  if (status === "未解决") return COLOR_RED;
+  if (status === "重新打开") return COLOR_YELLOW;
+  if (status === "待验收" || status === "已回归，持续测试" || status === "未复现，持续测试") return COLOR_PURPLE;
+  if (CLOSED_STATUSES.includes(status)) return COLOR_GREEN;
+  return null;
+}
+
+function buildDateFieldOptions() {
+  const options = [];
+  for (const s of ALL_STATUSES) {
+    options.push({ name: s, color: COLOR_DEFAULT });
+    const c = newColorOf(s);
+    if (c !== null) options.push({ name: s + "_新", color: c });
+  }
+  return options;
+}
+
 async function ensureDateField(token, matrixTableId, dateStr) {
   const data = await request(
     `${FEISHU_API}/bitable/v1/apps/${APP_TOKEN}/tables/${matrixTableId}/fields?page_size=500`,
     { method: "GET", headers: authHeaders(token) }
   );
-  if (data.data.items.some((f) => f.field_name === dateStr)) return false;
+  const existing = data.data.items.find((f) => f.field_name === dateStr);
+  if (existing) {
+    return { created: false, isSingleSelect: existing.type === 3 };
+  }
   await request(
     `${FEISHU_API}/bitable/v1/apps/${APP_TOKEN}/tables/${matrixTableId}/fields`,
-    { method: "POST", headers: authHeaders(token), body: JSON.stringify({ field_name: dateStr, type: 1 }) }
+    {
+      method: "POST",
+      headers: authHeaders(token),
+      body: JSON.stringify({ field_name: dateStr, type: 3, property: { options: buildDateFieldOptions() } }),
+    }
   );
-  console.log(`Created matrix field "${dateStr}"`);
-  return true;
+  console.log(`Created matrix field "${dateStr}" (single-select with color options)`);
+  return { created: true, isSingleSelect: true };
 }
 
 async function fetchMatrixRows(token, matrixTableId) {
@@ -166,18 +206,160 @@ async function batchUpdate(token, matrixTableId, payloads) {
   }
 }
 
-async function writeDailyMatrix(token, matrixTableId, dateStr, bugRecords, byBugId) {
+async function ensureMatrixTable(token) {
+  const data = await request(`${FEISHU_API}/bitable/v1/apps/${APP_TOKEN}/tables`, {
+    method: "GET", headers: authHeaders(token),
+  });
+  const found = data.data.items.find((t) => t.name === MATRIX_TABLE_NAME);
+  if (found) return found.table_id;
+  const created = await request(`${FEISHU_API}/bitable/v1/apps/${APP_TOKEN}/tables`, {
+    method: "POST", headers: authHeaders(token),
+    body: JSON.stringify({
+      table: {
+        name: MATRIX_TABLE_NAME,
+        fields: [
+          { field_name: "记录ID", type: 1 },
+          { field_name: "问题描述", type: 1 },
+          { field_name: "序号", type: 2 },
+        ],
+      },
+    }),
+  });
+  console.log(`Created table "${MATRIX_TABLE_NAME}" (id=${created.data.table_id})`);
+  return created.data.table_id;
+}
+
+async function ensureSequenceField(token, matrixTableId) {
+  const data = await request(
+    `${FEISHU_API}/bitable/v1/apps/${APP_TOKEN}/tables/${matrixTableId}/fields?page_size=500`,
+    { method: "GET", headers: authHeaders(token) }
+  );
+  const existing = data.data.items.find((f) => f.field_name === "序号");
+  if (existing) return existing.field_id;
+  const created = await request(
+    `${FEISHU_API}/bitable/v1/apps/${APP_TOKEN}/tables/${matrixTableId}/fields`,
+    { method: "POST", headers: authHeaders(token), body: JSON.stringify({ field_name: "序号", type: 2 }) }
+  );
+  console.log(`Created matrix field "序号"`);
+  return created.data.field.field_id;
+}
+
+async function ensureMatrixViewSort(token, matrixTableId, seqFieldId) {
+  const views = await request(
+    `${FEISHU_API}/bitable/v1/apps/${APP_TOKEN}/tables/${matrixTableId}/views`,
+    { method: "GET", headers: authHeaders(token) }
+  );
+  for (const v of views.data.items || []) {
+    if (v.view_type !== "grid") continue;
+    await request(
+      `${FEISHU_API}/bitable/v1/apps/${APP_TOKEN}/tables/${matrixTableId}/views/${v.view_id}`,
+      {
+        method: "PATCH",
+        headers: authHeaders(token),
+        body: JSON.stringify({
+          property: { sort_info: { sort_infos: [{ field_id: seqFieldId, desc: false }] } },
+        }),
+      }
+    ).catch((e) => console.log(`  View ${v.view_id} sort PATCH failed: ${e.message}`));
+  }
+}
+
+async function migrateOldTextDateFields(token, matrixTableId) {
+  const fieldsResp = await request(
+    `${FEISHU_API}/bitable/v1/apps/${APP_TOKEN}/tables/${matrixTableId}/fields?page_size=500`,
+    { method: "GET", headers: authHeaders(token) }
+  );
+  const dateFields = fieldsResp.data.items.filter((f) => /^\d{4}-\d{2}-\d{2}$/.test(f.field_name));
+  const textDateFields = dateFields.filter((f) => f.type === 1);
+  if (textDateFields.length === 0) return;
+
+  textDateFields.sort((a, b) => a.field_name.localeCompare(b.field_name));
+  console.log(`Migrating ${textDateFields.length} text date columns to single-select: ${textDateFields.map((f) => f.field_name).join(", ")}`);
+
+  const allRows = [];
+  let pageToken = undefined;
+  for (let page = 0; page < 500; page++) {
+    let url = `${FEISHU_API}/bitable/v1/apps/${APP_TOKEN}/tables/${matrixTableId}/records?page_size=500`;
+    if (pageToken) url += `&page_token=${pageToken}`;
+    const data = await request(url, { method: "GET", headers: authHeaders(token) });
+    allRows.push(...(data.data.items || []));
+    if (!data.data.has_more || !data.data.page_token) break;
+    pageToken = data.data.page_token;
+  }
+
+  const valuesByDate = new Map();
+  for (const f of dateFields) {
+    const m = new Map();
+    for (const r of allRows) {
+      const v = extractText(r.fields[f.field_name]);
+      if (v) m.set(r.record_id, v);
+    }
+    valuesByDate.set(f.field_name, m);
+  }
+
+  for (const f of textDateFields) {
+    const dateStr = f.field_name;
+    const yesterdayStr = getBeijingYesterday(dateStr);
+    const todayValues = valuesByDate.get(dateStr) || new Map();
+    const yestValues = valuesByDate.get(yesterdayStr) || new Map();
+
+    console.log(`  ${dateStr}: ${todayValues.size} non-empty values, deleting + recreating as single-select...`);
+
+    await request(
+      `${FEISHU_API}/bitable/v1/apps/${APP_TOKEN}/tables/${matrixTableId}/fields/${f.field_id}`,
+      { method: "DELETE", headers: authHeaders(token) }
+    );
+    await request(
+      `${FEISHU_API}/bitable/v1/apps/${APP_TOKEN}/tables/${matrixTableId}/fields`,
+      {
+        method: "POST",
+        headers: authHeaders(token),
+        body: JSON.stringify({ field_name: dateStr, type: 3, property: { options: buildDateFieldOptions() } }),
+      }
+    );
+
+    const updates = [];
+    for (const [recordId, status] of todayValues) {
+      const yestRaw = yestValues.get(recordId) || "";
+      const yestNorm = yestRaw.replace(/_新$/, "");
+      let dateValue = status;
+      if (status !== yestNorm && newColorOf(status) !== null) {
+        dateValue = status + "_新";
+      }
+      updates.push({ record_id: recordId, fields: { [dateStr]: dateValue } });
+    }
+    if (updates.length > 0) await batchUpdate(token, matrixTableId, updates);
+    console.log(`    Wrote ${updates.length} values back to new single-select column`);
+
+    valuesByDate.set(dateStr, new Map(updates.map((u) => [u.record_id, u.fields[dateStr]])));
+  }
+  console.log(`Migration complete.`);
+}
+
+async function writeDailyMatrix(token, matrixTableId, dateStr, yesterdayStr, bugRecords, byBugId, useColorOptions) {
   const toCreate = [];
   const toUpdate = [];
-  for (const r of bugRecords) {
+  for (let i = 0; i < bugRecords.length; i++) {
+    const r = bugRecords[i];
     const bugId = r.record_id;
     const status = extractText(r.fields["问题状态"]);
     const desc = extractText(r.fields["问题描述"]);
+    const seq = i + 1;
     const existing = byBugId.get(bugId);
+
+    let dateValue = status;
+    if (useColorOptions && status) {
+      const yestRaw = existing ? extractText(existing.fields[yesterdayStr]) : "";
+      const yestNorm = yestRaw.replace(/_新$/, "");
+      if (status !== yestNorm && newColorOf(status) !== null) {
+        dateValue = status + "_新";
+      }
+    }
+
     if (existing) {
-      toUpdate.push({ record_id: existing.matrixRecordId, fields: { [dateStr]: status } });
+      toUpdate.push({ record_id: existing.matrixRecordId, fields: { [dateStr]: dateValue, "序号": seq } });
     } else {
-      toCreate.push({ fields: { "记录ID": bugId, "问题描述": desc, [dateStr]: status } });
+      toCreate.push({ fields: { "记录ID": bugId, "问题描述": desc, "序号": seq, [dateStr]: dateValue } });
     }
   }
   console.log(`Writing daily matrix: ${toCreate.length} new rows, ${toUpdate.length} updates`);
@@ -315,8 +497,11 @@ async function main() {
 
   console.log(`Total: ${total}, 未解决: ${unresolved}, 待验收: ${pending}, 重新打开: ${reopened}, 持续测试: ${testing}, 已修复待发版: ${missing}, ratio: ${ratio}%`);
 
-  const matrixTableId = await getTableId(token, MATRIX_TABLE_NAME);
-  await ensureDateField(token, matrixTableId, dateStr);
+  const matrixTableId = await ensureMatrixTable(token);
+  await migrateOldTextDateFields(token, matrixTableId);
+  const dateFieldInfo = await ensureDateField(token, matrixTableId, dateStr);
+  const seqFieldId = await ensureSequenceField(token, matrixTableId);
+  await ensureMatrixViewSort(token, matrixTableId, seqFieldId);
 
   console.log("Fetching matrix rows...");
   const { byBugId } = await fetchMatrixRows(token, matrixTableId);
@@ -330,7 +515,7 @@ async function main() {
     console.log(`Transitions: toUnresolved=${transitions.toUnresolved} toPending=${transitions.toPending} toReopened=${transitions.toReopened} toClosed=${transitions.toClosed} toTesting=${transitions.toTesting} toTestingOld=${transitions.toTestingOld}`);
   }
 
-  await writeDailyMatrix(token, matrixTableId, dateStr, records, byBugId);
+  await writeDailyMatrix(token, matrixTableId, dateStr, yesterdayStr, records, byBugId, dateFieldInfo.isSingleSelect);
 
   const historyTableId = await getTableId(token, HISTORY_TABLE_NAME);
   await ensureFields(token, historyTableId);
