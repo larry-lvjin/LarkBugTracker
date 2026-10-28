@@ -1,127 +1,67 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Bug Tracker</title>
-  <script type="module" crossorigin src="./assets/index-CeKFK6ev.js"></script>
-  <link rel="stylesheet" crossorigin href="./assets/index-HRMEqiCU.css">
+  <meta name="color-scheme" content="light">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <title>Sigma 耳机 Bug Tracker</title>
+  <script type="module" crossorigin src="./assets/index-p_jgWlOr.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/index-CphtqygW.css">
 </head>
 <body>
-  <div id="app">
-    <div class="header">
-      <h1>Sigma 耳机Bug Tracker</h1>
-      <div class="actions">
-        <button id="refreshBtn" title="刷新数据">&#8635; 刷新</button>
-        <button id="settingsBtn" title="设置">&#9881; 设置</button>
-      </div>
-    </div>
-
-    <div id="cards" class="cards loading">
-      <div class="card card-blue">
-        <div class="card-label">总数</div>
-        <div class="card-value" id="totalValue">--</div>
-      </div>
-      <div class="card card-red">
-        <div class="card-label">未解决</div>
-        <div class="card-value" id="unresolvedValue">--</div>
-      </div>
-      <div class="card card-orange">
-        <div class="card-label">重新打开</div>
-        <div class="card-value" id="reopenedValue">--</div>
-      </div>
-      <div class="card card-purple">
-        <div class="card-label">未解决与重新打开占比</div>
-        <div class="card-value" id="ratioValue">--</div>
-      </div>
-    </div>
-
-    <div class="chart-section" data-chart="statusArea">
-      <h2>Bug 状态分布</h2>
-      <div class="chart-container">
-        <canvas id="statusAreaChart"></canvas>
-      </div>
-    </div>
-
-    <div class="chart-section" data-chart="ratio">
-      <h2>未解决占比趋势</h2>
-      <div class="chart-container chart-container-small">
-        <canvas id="ratioChart"></canvas>
-      </div>
-    </div>
-
-    <div class="chart-section" data-chart="newUnresolved">
-      <h2>未解决变化</h2>
-      <div class="chart-container chart-container-small">
-        <canvas id="newUnresolvedChart"></canvas>
-      </div>
-    </div>
-
-    <div class="chart-section" data-chart="newReopened">
-      <h2>重新打开变化</h2>
-      <div class="chart-container chart-container-small">
-        <canvas id="newReopenedChart"></canvas>
-      </div>
-    </div>
-
-    <div class="chart-section" data-chart="newVerify">
-      <h2>待验收+持续测试变化</h2>
-      <div class="chart-container chart-container-small">
-        <canvas id="newVerifyChart"></canvas>
-      </div>
-    </div>
-
-    <div class="chart-section" data-chart="newClosed">
-      <h2>已关闭变化</h2>
-      <div class="chart-container chart-container-small">
-        <canvas id="newClosedChart"></canvas>
-      </div>
-    </div>
-
-    <div id="status" class="status"></div>
-    <div id="historyInfo" class="history-info"></div>
-  </div>
-
-  <div id="settingsModal" class="settings-modal">
-    <div class="settings-modal-content">
-      <div class="settings-modal-header">
-        <span>设置</span>
-        <button id="settingsClose" class="modal-close-btn">&times;</button>
-      </div>
-      <div class="settings-modal-body">
-        <div class="settings-group">
-          <label class="settings-label">群机器人 Webhook 地址</label>
-          <input id="webhookInput" class="settings-input" type="password" placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/" autocomplete="off">
-          <div class="settings-hint">每天早上 9:00 自动推送数据到群</div>
-        </div>
-        <div class="settings-actions">
-          <button id="saveWebhookBtn" class="settings-btn settings-btn-primary">保存</button>
-          <button id="sendNowBtn" class="settings-btn settings-btn-send">立即发送</button>
-        </div>
-        <div id="settingsStatus" class="settings-status"></div>
-        <div class="settings-divider"></div>
-        <div class="settings-group">
-          <div class="stats-header">
-            <label class="settings-label">详细统计</label>
-            <button id="exportBtn" class="settings-btn stats-export-btn">导出 Excel</button>
-          </div>
-          <div id="statsTable" class="stats-table-wrap"></div>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <div id="chartModal" class="chart-modal">
-    <div class="chart-modal-content">
-      <div class="chart-modal-header">
-        <span id="modalTitle"></span>
-        <button id="modalClose" class="modal-close-btn">&times;</button>
-      </div>
-      <div class="chart-modal-body">
-        <canvas id="modalChart"></canvas>
-      </div>
-    </div>
-  </div>
-
+  <main id="app">
+    <header class="page-header">
+      <div class="brand"><span class="brand-mark" aria-hidden="true">Σ</span><div><h1>Sigma 耳机 Bug Tracker</h1><p>状态存量 · 每日转入</p></div></div>
+      <div class="header-actions"><span class="readonly-tag">只读</span><button id="refreshBtn" class="primary" type="button">↻ 刷新</button><button id="aboutBtn" type="button" aria-label="查看数据来源与统计说明">说明</button></div>
+    </header>
+    <div id="demoBanner" class="notice demo" hidden><strong>演示模式 · 全部为模拟数据</strong><span>固定演示日期：2026-10-28。未连接飞书，不代表真实 Bug 数据。</span></div>
+    <div id="loadStatus" class="load-status" role="status" aria-live="polite">准备连接飞书…</div>
+    <div id="fatalError" class="notice error" role="alert" hidden></div>
+    <section class="stock-cards" aria-label="当前状态数量">
+      <article class="metric-card open-card"><div class="card-heading"><span class="dot open"></span>当前未解决＋重新打开</div><div class="card-number" id="openValue">—</div><p id="openBreakdown">等待读取 Bug 主表</p></article>
+      <article class="metric-card pending-card"><div class="card-heading"><span class="dot pending"></span>当前待验收</div><div class="card-number" id="pendingValue">—</div><p>仅“待验收”，不含持续测试</p></article>
+    </section>
+    <div class="section-title"><h2>今日转入 <small>按 Bug 去重</small></h2><span id="todayLabel" class="subtle"></span></div>
+    <section id="incomingCards" class="incoming-cards" aria-label="今日新增状态数量"></section>
+    <div id="coverageNotice" class="notice coverage"></div>
+    <section class="toolbar" aria-label="趋势筛选">
+      <label>日期范围<select id="rangeSelect"><option value="7">近 7 天</option><option value="30" selected>近 30 天</option><option value="90">近 90 天</option><option value="all">全部可用日期</option><option value="custom">自定义</option></select></label>
+      <div id="customRange" class="date-range" hidden><label>开始<input id="startDate" type="date"></label><label>结束<input id="endDate" type="date"></label><button id="applyRange" type="button">应用</button></div>
+      <label class="check-label"><input id="showHistory" type="checkbox" checked>显示旧历史表存量</label>
+      <label class="check-label"><input id="autoRefresh" type="checkbox" checked>自动刷新</label>
+    </section>
+    <div id="rangeError" class="inline-error" role="alert" hidden></div>
+    <section class="chart-panel" aria-labelledby="stockHeading">
+      <div class="panel-heading"><div><h2 id="stockHeading">每日状态总量</h2><p id="stockCaption">今天读主表，历史读已有快照；缺失日期不补零。</p></div><button type="button" id="zoomStock" class="quiet">放大</button></div>
+      <div class="chart-wrap"><canvas id="stockChart" role="img" aria-label="每日未解决加重新打开和待验收总量折线图"></canvas><p id="stockEmpty" class="chart-empty" hidden>暂无可用存量数据</p></div>
+      <p class="footnote">历史点来自 BugStats_History 原记录，统计范围与采集时点未验证，不等同于已验证的日终快照。今天是当前读取值。</p>
+    </section>
+    <section class="chart-panel" aria-labelledby="incomingHeading">
+      <div class="panel-heading"><div><h2 id="incomingHeading">每日新增状态变化</h2><p>转入记录数，不是存量差值。点击数据点查看 Bug 明细。</p></div><button type="button" id="zoomIncoming" class="quiet">放大</button></div>
+      <div class="chart-wrap"><canvas id="incomingChart" role="img" aria-label="每日新增未解决、重新打开、待验收的去重数量折线图"></canvas><p id="incomingEmpty" class="chart-empty" hidden>暂无有效日志，等待采集验证</p></div>
+      <p class="footnote">同一 Bug 同一天转入同一状态只计 1 个；转走不撤销计入。0 仅表示已读日志中未发现转入，不保证当天自动化无漏采。</p>
+    </section>
+    <section class="panel details-panel" id="detailsPanel" aria-labelledby="detailsHeading">
+      <div class="panel-heading"><div><h2 id="detailsHeading">转入明细</h2><p id="detailSummary">选择日期和状态查看记录。</p></div><button id="exportDetails" type="button" class="quiet">导出明细</button></div>
+      <div class="detail-filters"><label>日期<input id="detailDate" type="date"></label><label>目标状态<select id="detailMetric"></select></label><label class="search-label">搜索<input id="detailSearch" type="search" placeholder="Bug 编号或记录 ID"></label></div>
+      <div class="table-wrap"><table><thead><tr><th>Bug 编号</th><th>首次转入 / 北京时间</th><th>最后日志</th><th>日志条数</th></tr></thead><tbody id="detailBody"></tbody></table></div>
+      <div class="table-footer"><span id="detailPageInfo"></span><div><button id="prevDetails" type="button">上一页</button><button id="nextDetails" type="button">下一页</button></div></div>
+    </section>
+    <details class="panel daily-panel"><summary>每日数据表 <span class="subtle">含数据质量标记</span></summary><div class="panel-heading"><p>“—” 表示未知或未覆盖，不代表 0。</p><button id="exportDaily" type="button">导出每日数据</button></div><div class="table-wrap"><table><thead><tr><th>日期</th><th>未解决＋重新打开</th><th>待验收</th><th>新增未解决</th><th>新增重新打开</th><th>新增待验收</th><th>存量来源</th></tr></thead><tbody id="dailyBody"></tbody></table></div></details>
+    <footer><span id="updatedAt">尚未更新</span><span>数据不回写 · 北京时间 · v2.0.0</span></footer>
+  </main>
+  <dialog id="aboutDialog"><div class="dialog-heading"><h2>数据来源与统计说明</h2><button type="button" data-close="aboutDialog" aria-label="关闭说明">×</button></div><div class="dialog-body">
+    <p><strong>全表口径：</strong>固定读取 Bug 主表，不跟随当前选择的视图或筛选条件。只读当前用户有权限看到的记录；高级权限可能限制数据范围。</p>
+    <p><strong>实时：</strong>插件可见时每 60 秒刷新，并监听记录变化后防抖刷新。自动化日志可能延迟，插件不会查询或改变自动化状态；页面关闭不影响已经启用的飞书自动化。</p>
+    <p><strong>新增：</strong>按“日期＋目标状态＋来源记录 ID”去重。创建时直接赋初始状态不在这三条更新规则的明确覆盖范围内；不将当前状态、库存差值或旧的“其他到…”列当作转入事件。</p>
+    <p><strong>覆盖：</strong>启用时间依据用户报告。出现日志只能证明有事件被记录，不能证明整个日期完整、规则从未失败。采集前、尚未有首条日志、读取失败的数据不伪装为已验证的 0。</p>
+    <p><strong>历史库存：</strong>只读已有 BugStats_History 的日期、未解决、重新打开、待验收。缺列、缺日期不补零；冲突日期不选取任意一行。只记录三个目标的转入不足以还原全部历史库存。</p>
+    <div id="ruleInfo" class="rule-list"></div>
+    <h3>本轮读取诊断</h3><div id="sourceInfo"></div>
+    <p class="footnote">不需要 App Secret 或 HTTP 接收服务。不创建/修改任何表格、记录、字段或自动化，不保存原始 Bug 数据到浏览器存储。显示偏好仅保存在本机。</p>
+    <a id="sourceLink" target="_blank" rel="noopener noreferrer">打开来源多维表格 ↗</a>
+  </div></dialog>
+  <dialog id="chartDialog" class="large-dialog"><div class="dialog-heading"><h2 id="zoomTitle">趋势图</h2><button type="button" data-close="chartDialog" aria-label="关闭放大图">×</button></div><div class="zoom-chart"><canvas id="zoomChart"></canvas></div></dialog>
 </body>
 </html>

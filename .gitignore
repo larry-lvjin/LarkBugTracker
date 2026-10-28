@@ -3,3 +3,7 @@ node_modules/
 *.local
 .env
 .env.*
+.npm-cache/
+artifacts/
+.wrangler/
+*.log

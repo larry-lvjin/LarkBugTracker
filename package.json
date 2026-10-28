@@ -1,20 +1,28 @@
 {
-  "name": "feishu-bug-plugin",
-  "version": "1.0.0",
+  "name": "sigma-bug-tracker-readonly",
+  "version": "2.0.0",
   "private": true,
+  "type": "module",
+  "description": "只读飞书多维表格插件：状态存量与按日去重的状态转入统计",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview"
+    "dev": "vite --host 127.0.0.1",
+    "build": "vite build --configLoader native",
+    "preview": "vite preview --host 127.0.0.1",
+    "test": "node --test --test-isolation=none tests/*.test.js",
+    "test:browser": "node scripts/browser-check.js",
+    "check:readonly": "node scripts/check-readonly.js",
+    "check": "npm run test && npm run check:readonly && npm run build"
   },
-  "output": "dist",
+  "engines": {
+    "node": ">=24.0.0"
+  },
   "dependencies": {
-    "@lark-base-open/js-sdk": "^0.5.0",
-    "chart.js": "^4.4.7",
-    "sharp": "^0.34.5",
-    "xlsx": "^0.18.5"
+    "@lark-base-open/js-sdk": "0.5.0",
+    "chart.js": "4.4.7"
   },
   "devDependencies": {
-    "vite": "^6.3.5"
-  }
+    "@playwright/test": "^1.64.1",
+    "vite": "^6.4.1"
+  },
+  "output": "dist"
 }
